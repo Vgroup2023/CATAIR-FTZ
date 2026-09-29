@@ -1,0 +1,18 @@
+# Render Blueprint: New > Blueprint > pick this repo. A persistent disk requires a paid plan.
+services:
+  - type: web
+    name: ftz-system
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: FTZ_AUTH_USER
+        value: admin
+      - key: FTZ_AUTH_PASSWORD
+        sync: false        # you type this in the Render dashboard; never commit it
+      - key: FTZ_DB
+        value: /data/ftz.db
+    disk:
+      name: ftz-data
+      mountPath: /data
+      sizeGB: 1
