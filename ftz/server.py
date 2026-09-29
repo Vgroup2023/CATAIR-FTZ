@@ -1,7 +1,5 @@
 """HTTP server (standard library only): JSON API, printable forms, CSV export, static UI."""
-import base64
 import csv
-import hmac
 import html
 import io
 import json
@@ -10,11 +8,13 @@ import os
 import re
 import sqlite3
 import sys
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import db, rules
+from . import auth, db, rules
+from .auth import LIMITS
+from .db import audit
+from .demo import seed_demo_data
 from .service import ApiError, Service
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -128,16 +128,12 @@ def print_page(kind, svc, ident):
             "file through ACE or your broker/customs software.</p><script>window.print&&setTimeout(()=>print(),300)</script>")
 
 
-def load_users():
-    """Login accounts from FTZ_USERS="alice:pw1;bob:pw2" (or FTZ_AUTH_USER + FTZ_AUTH_PASSWORD)."""
-    users = {}
-    for pair in filter(None, (os.environ.get("FTZ_USERS") or "").split(";")):
-        name, _, pw = pair.partition(":")
-        if name.strip() and pw:
-            users[name.strip()] = pw
-    if os.environ.get("FTZ_AUTH_USER") and os.environ.get("FTZ_AUTH_PASSWORD"):
-        users[os.environ["FTZ_AUTH_USER"]] = os.environ["FTZ_AUTH_PASSWORD"]
-    return users
+PUBLIC_FILES = {"/style.css", "/auth.css", "/auth.js", "/logo.png", "/compass.png", "/favicon.png"}
+COOKIE = "ftz_session"
+
+
+def trust_proxy():
+    return os.environ.get("FTZ_TRUST_PROXY", "").lower() in ("1", "true", "yes")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -145,67 +141,175 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         if os.environ.get("FTZ_QUIET") != "1":
-            sys.stderr.write("%s %s\n" % (self.command, self.path))
+            sys.stderr.write("%s %s\n" % (self.command, self.path.split("?")[0]))  # never log query strings (reset tokens)
 
-    def send(self, code, body, ctype="application/json", extra=None):
+    def send(self, code, body, ctype="application/json", extra=None, cookies=()):
         data = body if isinstance(body, bytes) else body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
+        for c in cookies:
+            self.send_header("Set-Cookie", c)
         self.end_headers()
         if self.command != "HEAD":  # HEAD gets the same headers, no body
             self.wfile.write(data)
 
-    def json(self, code, obj):
-        self.send(code, json.dumps(obj, default=str))
+    def json(self, code, obj, cookies=()):
+        self.send(code, json.dumps(obj, default=str), cookies=cookies)
 
-    def authenticate(self, users):
-        """HTTP Basic auth; returns the username, or None after sending a 401."""
-        try:
-            kind, _, tok = (self.headers.get("Authorization") or "").partition(" ")
-            name, _, pw = base64.b64decode(tok).decode().partition(":") if kind.lower() == "basic" else ("", "", "")
-        except Exception:
-            name = pw = ""
-        expected = users.get(name)
-        if expected is not None and hmac.compare_digest(expected.encode(), pw.encode()):
-            return name
-        time.sleep(0.5)  # slow down password guessing
-        self.send(401, json.dumps({"errors": ["login required"]}), extra={"WWW-Authenticate": 'Basic realm="Globlexus FTZ", charset="UTF-8"'})
+    # ---- request helpers
+    def cookie_token(self):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == COOKIE:
+                return v
         return None
+
+    def client_ip(self):
+        if trust_proxy() and self.headers.get("X-Forwarded-For"):
+            return self.headers["X-Forwarded-For"].split(",")[0].strip()
+        return self.client_address[0]
+
+    def secure(self):
+        return (trust_proxy() and self.headers.get("X-Forwarded-Proto") == "https") or \
+            os.environ.get("FTZ_COOKIE_SECURE", "").lower() in ("1", "true", "yes")
+
+    def base_url(self):
+        return ("https" if self.secure() else "http") + "://" + (self.headers.get("Host") or "localhost")
+
+    def session_cookie(self, token, max_age):
+        return f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}" + ("; Secure" if self.secure() else "")
+
+    def read_body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 5_000_000:
+            raise ApiError("request too large", 413)
+        if n and not (self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+            raise ApiError("JSON requests only", 415)
+        try:
+            body = json.loads(self.rfile.read(n) or b"{}")
+        except ValueError:
+            raise ApiError("invalid JSON")
+        if not isinstance(body, dict):
+            raise ApiError("JSON object expected")
+        return body
+
+    def tx(self, con, fn):
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            result = fn()
+            con.commit()
+            return result
+        except BaseException:
+            con.rollback()
+            raise
+
+    # ---- /auth/* (some public, some need a session)
+    def auth_route(self, con, method, path, body, user):
+        if method == "GET" and path == "/auth/config":
+            return self.json(200, {"demo": auth.demo_credentials(), "email_reset": auth.smtp_ready()})
+        if method == "POST" and path == "/auth/login":
+            uname, ip = str(body.get("username") or "").strip().lower(), self.client_ip()
+            key = f"u:{uname}|{ip}"
+            if LIMITS.count(key, 900) >= 5 or LIMITS.count("ip:" + ip, 900) >= 30:
+                raise ApiError("too many sign-in attempts - wait 15 minutes and try again", 429)
+            u = auth.authenticate(con, body.get("username"), str(body.get("password") or ""))
+            if not u:
+                LIMITS.add(key)
+                LIMITS.add("ip:" + ip)
+                raise ApiError("incorrect user name or password", 401)
+            LIMITS.clear(key)
+            token = self.tx(con, lambda: auth.new_session(con, u["id"]))
+            return self.json(200, {"user": auth.public_user(u)}, cookies=[self.session_cookie(token, auth.SESSION_HOURS * 3600)])
+        if method == "POST" and path == "/auth/forgot":
+            ident, ip = str(body.get("identifier") or "").strip().lower(), self.client_ip()
+            if LIMITS.count("fip:" + ip, 900) < 5 and LIMITS.count("fid:" + ident, 3600) < 3:
+                LIMITS.add("fip:" + ip)
+                LIMITS.add("fid:" + ident)
+                self.tx(con, lambda: auth.start_reset(con, ident, self.base_url()))
+            return self.json(200, {"message": "If an account matches, a password reset link is on its way."})
+        if method == "POST" and path == "/auth/reset":
+            ip = self.client_ip()
+            if LIMITS.count("rip:" + ip, 900) >= 10:
+                raise ApiError("too many attempts - wait 15 minutes and try again", 429)
+            LIMITS.add("rip:" + ip)
+            name = self.tx(con, lambda: auth.complete_reset(con, str(body.get("token") or ""), str(body.get("password") or "")))
+            return self.json(200, {"message": "Password updated. You can sign in now.", "username": name})
+        if user is None:
+            raise ApiError("sign in required", 401)
+        if method == "GET" and path == "/auth/me":
+            return self.json(200, auth.public_user(user))
+        if method == "POST" and path == "/auth/logout":
+            self.tx(con, lambda: auth.end_session(con, self.cookie_token()))
+            return self.json(200, {"ok": True}, cookies=[self.session_cookie("", 0)])
+        if method == "POST" and path == "/auth/password":
+            self.tx(con, lambda: auth.change_own_password(con, user, str(body.get("current") or ""), str(body.get("new") or "")))
+            token = self.tx(con, lambda: auth.new_session(con, user["id"]))  # the change signed everyone out; keep this browser in
+            return self.json(200, {"message": "Password changed."}, cookies=[self.session_cookie(token, auth.SESSION_HOURS * 3600)])
+        if method == "POST" and path == "/auth/email":
+            self.tx(con, lambda: auth.update_own_email(con, user, str(body.get("current") or ""), body.get("email")))
+            return self.json(200, {"message": "Email saved."})
+        raise ApiError("not found", 404)
+
+    def admin_route(self, con, method, path, body, user):
+        """User management. Admins only; the shared demo account never qualifies."""
+        if not (user["role"] == "admin" and not user["is_demo"]):
+            raise ApiError("administrators only", 403)
+        if method == "GET" and path == "/api/users":
+            return self.json(200, auth.list_users(con))
+        if method == "POST" and path == "/api/users":
+            uid = self.tx(con, lambda: auth.create_user(con, body.get("username"), str(body.get("password") or ""), body.get("email"),
+                                                        role=body.get("role") or "user"))
+            self.tx(con, lambda: audit(con, user["username"], "create", "user", uid, {"username": body.get("username")}))
+            return self.json(200, {"id": uid})
+        m = re.match(r"^/api/users/(\d+)/(enable|disable|password)$", path)
+        if method == "POST" and m:
+            uid = int(m[1])
+            if m[2] == "password":
+                self.tx(con, lambda: auth.admin_set_password(con, user, uid, str(body.get("password") or "")))
+            else:
+                self.tx(con, lambda: auth.admin_set_active(con, user, uid, m[2] == "enable"))
+            return self.json(200, {"ok": True})
+        raise ApiError("not found", 404)
 
     def handle_any(self, method):
         url = urlparse(self.path)
-        if url.path == "/healthz":
-            return self.send(200, "ok", "text/plain")
-        users = load_users()
-        login = None
-        if users:
-            login = self.authenticate(users)
-            if login is None:
-                return
         path, query = url.path, {k: v[0] for k, v in parse_qs(url.query).items()}
+        if path == "/healthz":
+            return self.send(200, "ok", "text/plain")
         try:
-            if method == "GET" and not path.startswith(("/api/", "/print/", "/export/", "/backup")):
-                return self.static(path)
             body = {}
             if method in ("POST", "PUT"):
-                n = int(self.headers.get("Content-Length") or 0)
-                if n > 5_000_000:
-                    raise ApiError("request too large", 413)
-                try:
-                    body = json.loads(self.rfile.read(n) or b"{}")
-                except ValueError:
-                    raise ApiError("invalid JSON")
-                if not isinstance(body, dict):
-                    raise ApiError("JSON object expected")
-            user = login or (self.headers.get("X-User") or "unknown")[:60]  # logged-in name cannot be spoofed
+                origin = self.headers.get("Origin")
+                if origin and urlparse(origin).netloc != self.headers.get("Host"):
+                    raise ApiError("cross-site request blocked", 403)
+                body = self.read_body()
+            if method == "GET" and path in PUBLIC_FILES:
+                return self.static(path)
+            if method == "GET" and path == "/reset":
+                return self.static("/reset.html")
             con = db.connect()
             try:
-                svc = Service(con, user)
+                user = auth.session_user(con, self.cookie_token())
+                if path.startswith("/auth/"):
+                    return self.auth_route(con, method, path, body, user)
+                if method == "GET" and path == "/":
+                    return self.static("/index.html" if user else "/login.html")
+                if user is None:
+                    if path.startswith("/api/") or path == "/app.js":
+                        raise ApiError("sign in required", 401)
+                    return self.send(302, "", "text/plain", {"Location": "/"})
+                if method == "GET" and path == "/app.js":
+                    return self.static("/app.js")
+                if path.startswith("/api/users"):
+                    return self.admin_route(con, method, path, body, user)
+                svc = Service(con, user["username"])
                 if method == "GET" and path.startswith("/print/"):
                     m = re.match(r"^/print/(\w+)/(\d+)$", path)
                     if not m:
@@ -214,18 +318,13 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "GET" and path.startswith("/export/"):
                     return self.export(con, path.split("/")[2].removesuffix(".csv"))
                 if method == "GET" and path == "/backup":
+                    if not (user["role"] == "admin" and not user["is_demo"]):
+                        raise ApiError("administrators only", 403)  # the backup contains every account's password hash
                     return self.backup(con)
                 for m, rx, fn in ROUTES:
                     mt = rx.match(path)
                     if m == method and mt:
-                        con.execute("BEGIN IMMEDIATE")
-                        try:
-                            result = fn(svc, mt, body, query)
-                            con.commit()
-                        except BaseException:
-                            con.rollback()
-                            raise
-                        return self.json(200, result)
+                        return self.json(200, self.tx(con, lambda: fn(svc, mt, body, query)))
                 raise ApiError("not found", 404)
             finally:
                 con.close()
@@ -258,8 +357,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, data, "application/octet-stream", {"Content-Disposition": 'attachment; filename="ftz-backup.db"'})
 
     def static(self, path):
-        rel = "index.html" if path in ("/", "") else path.lstrip("/")
-        full = os.path.realpath(os.path.join(STATIC, rel))
+        full = os.path.realpath(os.path.join(STATIC, path.lstrip("/")))
         if not full.startswith(os.path.realpath(STATIC) + os.sep) or not os.path.isfile(full):
             return self.json(404, {"errors": ["not found"]})
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
@@ -276,18 +374,22 @@ class Handler(BaseHTTPRequestHandler):
 def make_server(host="127.0.0.1", port=8214):
     con = db.connect()
     db.init(con)
+    notes = auth.seed_users(con)
+    if auth.demo_enabled() and seed_demo_data(con):
+        notes.append("demo mode: sample data loaded")
     con.close()
-    return ThreadingHTTPServer((host, port), Handler)
+    srv = ThreadingHTTPServer((host, port), Handler)
+    srv.notes = notes
+    return srv
 
 
 def main():
     host = os.environ.get("FTZ_HOST", "127.0.0.1")
     port = int(os.environ.get("FTZ_PORT") or os.environ.get("PORT") or 8214)
-    if host not in ("127.0.0.1", "localhost", "::1") and not load_users():
-        sys.exit("Refusing to listen on a public interface without a login. "
-                 "Set FTZ_AUTH_USER and FTZ_AUTH_PASSWORD (or FTZ_USERS).")
     srv = make_server(host, port)
-    print(f"FTZ system on http://{host}:{port}  (database: {db.db_path()})")
+    for n in srv.notes:
+        print(n, flush=True)
+    print(f"FTZ system on http://{host}:{port}  (database: {db.db_path()})", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

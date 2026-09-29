@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Globlexus FTZ Control - Sign in</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="auth.css">
+</head>
+<body class="auth">
+<section class="hero">
+  <img class="hero-logo" src="logo.png" alt="Globlexus Group">
+  <h1>Foreign-Trade Zone &amp; Bonded Warehouse Control</h1>
+  <p class="lead">One system for zone admissions, activity permits and in-bond movements, with an audit trail behind every change.</p>
+  <ul class="points">
+    <li><b>e214</b> admission &amp; status designation (PF · NPF · D · ZR) with 214B / 214A / 214C sheets</li>
+    <li><b>e216</b> activity permits: manipulate, manufacture, exhibit, destroy, temporary removal</li>
+    <li><b>In-bond</b> IT (61) · TE (62) · IE (63) with due-date tracking and proof of closure</li>
+    <li>Lot-level inventory, duty estimates, weekly-entry and reconciliation reports</li>
+  </ul>
+</section>
+<main class="panel">
+  <div class="card auth-card">
+    <div id="signin">
+      <h2>Sign in</h2>
+      <form id="login-form" autocomplete="on">
+        <label>User name<input name="username" id="username" autocomplete="username" required autofocus></label>
+        <label>Password
+          <span class="pw"><input name="password" id="password" type="password" autocomplete="current-password" required>
+          <button type="button" class="sm ghost" data-toggle="password">Show</button></span></label>
+        <div class="msg" id="login-msg" role="alert"></div>
+        <button class="primary wide" type="submit">Sign in</button>
+      </form>
+      <p class="alt"><a href="#" id="show-forgot">Forgot your password?</a></p>
+    </div>
+    <div id="forgot" hidden>
+      <h2>Reset your password</h2>
+      <p class="hint" id="forgot-hint">Enter your user name or email. We will send a reset link that works once, for 30 minutes.</p>
+      <form id="forgot-form">
+        <label>User name or email<input name="identifier" id="identifier" required></label>
+        <div class="msg" id="forgot-msg" role="status"></div>
+        <button class="primary wide" type="submit">Send reset link</button>
+      </form>
+      <p class="alt"><a href="#" id="show-signin">Back to sign in</a></p>
+    </div>
+  </div>
+  <div class="card demo" id="demo" hidden>
+    <h3>Try the demo</h3>
+    <p class="hint">Sample data only. Do not enter real records: this login is public and the data is reset when the server restarts.</p>
+    <dl>
+      <dt>User name</dt><dd><code id="demo-user"></code></dd>
+      <dt>Password</dt><dd><code id="demo-pass"></code></dd>
+    </dl>
+    <button type="button" class="wide" id="use-demo">Fill in demo login</button>
+  </div>
+  <p class="foot">Globlexus Group · FTZ Control</p>
+</main>
+<script src="auth.js"></script>
+</body>
+</html>

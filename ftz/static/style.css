@@ -11,7 +11,7 @@ aside{width:220px;background:var(--side);color:var(--side-ink);padding:16px 0;di
 nav a{display:block;padding:9px 18px;color:var(--side-ink);text-decoration:none;cursor:pointer;border-left:3px solid transparent}
 nav a:hover{background:rgba(255,255,255,.08)}nav a.on{background:rgba(255,255,255,.14);border-left-color:var(--gold-light);color:#fff;font-weight:700}
 nav .sep{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.55;padding:14px 18px 4px}
-.user{margin-top:auto;padding:14px 18px;font-size:12px}.user label{color:var(--gold-light)}.user input{width:100%;margin-top:4px;padding:6px;border-radius:4px;border:0}
+.user{margin-top:auto;padding:14px 18px;font-size:12px}.user .who{margin-bottom:8px}.user .who b{color:#fff}button.signout{width:100%;background:transparent;color:var(--side-ink);border-color:rgba(255,255,255,.35)}button.signout:hover{border-color:var(--gold-light)}.user input{width:100%;margin-top:4px;padding:6px;border-radius:4px;border:0}
 main{flex:1;padding:22px 26px;min-width:0}
 h1{font-size:22px;margin:0 0 4px;font-weight:800;letter-spacing:-.01em}h2{font-size:16px;margin:22px 0 8px}.sub{color:var(--mute);margin:0 0 16px}
 .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}.bar .grow{flex:1}

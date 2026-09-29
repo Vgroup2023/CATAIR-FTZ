@@ -18,16 +18,16 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 
-const user = $("#user");
-user.value = localStorage.getItem("ftzUser") || "";
-user.addEventListener("change", () => localStorage.setItem("ftzUser", user.value));
+let ME = null;         // signed-in user
+const isAdmin = () => ME && ME.role === "admin" && !ME.is_demo;
 
 async function api(method, url, body) {
   const r = await fetch(url, {
-    method, headers: { "Content-Type": "application/json", "X-User": user.value || "unknown" },
+    method, headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({ errors: ["unexpected response"] }));
+  if (r.status === 401 && url !== "/auth/login") { location.href = "/"; throw Object.assign(new Error("api"), { errors: ["Signed out - redirecting to sign in"] }); }
   if (!r.ok) throw Object.assign(new Error("api"), { errors: data.errors || ["request failed"] });
   return data;
 }
@@ -131,7 +131,7 @@ const MODE_OPTS = () => opts(L.modes.map((m) => [m, m]));
 const NAV = [
   ["dashboard", "Dashboard"], ["sep", "Foreign-Trade Zone"], ["admissions", "e214 Admissions"], ["permits", "e216 Permits & Activity"],
   ["inventory", "Zone Inventory"], ["sep", "Bonded movements"], ["inbonds", "In-Bond IT · TE · IE"], ["sep", "System"],
-  ["reports", "Reports"], ["setup", "Setup"], ["audit", "Audit & Export"],
+  ["reports", "Reports"], ["setup", "Setup"], ["audit", "Audit & Export"], ["sep", "Account"], ["account", "My Account"], ["users", "Users"],
 ];
 const VIEWS = {};
 async function go(name, arg) {
@@ -146,7 +146,11 @@ async function act(fn, msg) {   // run an action, toast result, or show its erro
   try { const r = await fn(); if (msg) toast(msg); return r; }
   catch (e) { if (e.errors) { alert(e.errors.join("\n")); return null; } throw e; }
 }
-$("#menu").append(...NAV.map(([k, t]) => k === "sep" ? h("div", { class: "sep" }, t) : h("a", { "data-v": k, onclick: () => go(k) }, t)));
+function buildShell() {
+  $("#menu").append(...NAV.filter(([k]) => k !== "users" || isAdmin()).map(([k, t]) => k === "sep" ? h("div", { class: "sep" }, t) : h("a", { "data-v": k, onclick: () => go(k) }, t)));
+  $("#who").replaceChildren(h("div", { class: "who" }, "Signed in as ", h("b", {}, ME.username), ME.is_demo ? " (demo)" : ""),
+    h("button", { class: "sm signout", onclick: async () => { try { await post("/auth/logout"); } finally { location.href = "/"; } } }, "Sign out"));
+}
 
 const head = (t, sub, ...btns) => h("div", {}, h("div", { class: "bar" }, h("h1", { class: "grow" }, t), btns), sub && h("p", { class: "sub" }, sub));
 const kv = (pairs) => h("div", { class: "kv" }, pairs.map(([k, v]) => h("div", {}, h("span", {}, k), v == null || v === "" ? "—" : v)));
@@ -468,13 +472,47 @@ VIEWS.reports = async () => {
     sec("In-bond summary", [{ h: "Type", k: "type" }, { h: "Status", k: "status" }, { h: "Count", k: "n", num: true }], r.inbond_summary));
 };
 
+VIEWS.account = async () => {
+  ME = await get("/auth/me");
+  const pwFields = [{ name: "current", label: "Current password", type: "password", required: true }, { name: "new", label: "New password (10+ characters)", type: "password", required: true },
+    { name: "again", label: "Repeat new password", type: "password", required: true }];
+  return h("div", {}, head("My Account", "Your sign-in details."),
+    h("div", { class: "card" }, kv([["User name", ME.username], ["Role", ME.role + (ME.is_demo ? " (shared demo account)" : "")], ["Email (for password reset)", ME.email]])),
+    ME.is_demo ? h("div", { class: "alert" }, "This is the shared demo account. Its password and email can't be changed.") : h("div", { class: "bar" },
+      h("button", { class: "primary", onclick: () => formModal("Change password", pwFields, {}, "Change password", async (v) => {
+        if (v.new !== v.again) throw { errors: ["The new passwords do not match"] };
+        await post("/auth/password", { current: v.current, new: v.new }); toast("Password changed"); }) }, "Change password"),
+      h("button", { onclick: () => formModal("Email for password reset", [{ name: "email", label: "Email address", type: "email" }, { name: "current", label: "Current password", type: "password", required: true }],
+        { email: ME.email }, "Save email", async (v) => { await post("/auth/email", v); toast("Email saved"); refresh(); }) }, "Set email")));
+};
+
+VIEWS.users = async () => {
+  if (!isAdmin()) throw { errors: ["Administrators only"] };
+  const users = await get("/api/users");
+  const setPw = (u) => formModal(`New password for ${u.username}`, [{ name: "password", label: "New password (10+ characters)", type: "password", required: true }], {}, "Set password",
+    async (v) => { await post(`/api/users/${u.id}/password`, v); toast("Password set - they are signed out everywhere"); });
+  return h("div", {}, head("Users", "People who can sign in. Passwords are stored hashed; an email lets a person reset their own password.",
+    h("button", { class: "primary", onclick: () => formModal("New user", [{ name: "username", label: "User name", required: true }, { name: "email", label: "Email", type: "email" },
+      { name: "role", label: "Role", type: "select", options: [["user", "User"], ["admin", "Administrator"]] }, { name: "password", label: "Temporary password (10+ characters)", type: "password", required: true }],
+      {}, "Create user", async (v) => { await post("/api/users", v); toast("User created"); refresh(); }) }, "+ New user")),
+    h("div", { class: "card" }, table([{ h: "User", k: "username" }, { h: "Email", k: "email" }, { h: "Role", k: "role" },
+      { h: "Status", f: (u) => u.is_demo ? tag("demo", "warn") : tag(u.active ? "active" : "disabled", u.active ? "ok" : "bad") }, { h: "Last sign-in", k: "last_login" },
+      { h: "", f: (u) => u.is_demo ? "" : h("span", {}, h("button", { class: "sm", onclick: () => setPw(u) }, "Set password"), " ",
+        h("button", { class: "sm", onclick: async () => { if (await act(() => post(`/api/users/${u.id}/${u.active ? "disable" : "enable"}`))) refresh(); } }, u.active ? "Disable" : "Enable")) }], users)));
+};
+
 VIEWS.audit = async () => {
   const log = await get("/api/audit");
   const ex = ["admissions", "admission_lines", "lots", "movements", "permits", "activities", "inbonds", "inbond_lines", "audit"];
   return h("div", {},
     head("Audit & Export", "Every change is recorded with the operator name. Export tables for CBP audit requests or take a full database backup."),
-    h("div", { class: "bar" }, ex.map((t) => h("a", { class: "btn", href: `/export/${t}.csv` }, t + ".csv")), h("a", { class: "btn primary", href: "/backup" }, "Full backup (.db)")),
+    h("div", { class: "bar" }, ex.map((t) => h("a", { class: "btn", href: `/export/${t}.csv` }, t + ".csv")), isAdmin() && h("a", { class: "btn primary", href: "/backup" }, "Full backup (.db)")),
     h("div", { class: "card" }, table([{ h: "When", k: "ts" }, { h: "User", k: "user" }, { h: "Action", k: "action" }, { h: "Entity", f: (r) => `${r.entity} #${r.entity_id}` }, { h: "Detail", k: "detail" }], log)));
 };
 
-go((location.hash || "#dashboard").slice(1) in VIEWS ? (location.hash || "#dashboard").slice(1) : "dashboard");
+(async () => {
+  try { ME = await get("/auth/me"); } catch (e) { return; }
+  buildShell();
+  const h0 = (location.hash || "#dashboard").slice(1);
+  go(h0 in VIEWS ? h0 : "dashboard");
+})();

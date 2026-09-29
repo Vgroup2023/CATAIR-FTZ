@@ -27,5 +27,5 @@ and ACE/AES transmission.
 * It records and validates FTZ data; it is **not** an ACE-certified filer and its printouts are worksheets, not official CBP forms.
 * Transit-day defaults for IT/TE/IE (30) are **placeholders** — set them to the limit your port grants (Setup → Settings).
 * The rules encoded here (e.g. IE same-port, ZR restrictions) should be confirmed with your customs broker/FTZ operator.
-* Locally it binds to `127.0.0.1` with no login. To host it, set `FTZ_AUTH_USER`/`FTZ_AUTH_PASSWORD` (the server refuses a public
-  bind without them) and follow [DEPLOY.md](DEPLOY.md) (Render or a VPS with HTTPS).
+* There is a sign-in front page with self-service password reset and an optional public demo login. On first run with no accounts it
+  prints a one-time `admin` password. Follow [DEPLOY.md](DEPLOY.md) to host it (Render or a VPS with HTTPS).

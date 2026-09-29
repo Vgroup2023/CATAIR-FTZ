@@ -11,3 +11,7 @@ services:
         value: admin
       - key: FTZ_AUTH_PASSWORD
         sync: false        # you type this in the Render dashboard; never commit it
+      - key: FTZ_DEMO_MODE
+        value: "true"      # front page shows a demo login and sample data. Remove for real records.
+      - key: FTZ_TRUST_PROXY
+        value: "1"         # Render terminates HTTPS in front of the app

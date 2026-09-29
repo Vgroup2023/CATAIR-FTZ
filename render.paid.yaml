@@ -11,6 +11,10 @@ services:
         value: admin
       - key: FTZ_AUTH_PASSWORD
         sync: false        # you type this in the Render dashboard; never commit it
+      - key: FTZ_TRUST_PROXY
+        value: "1"         # Render terminates HTTPS in front of the app
+      - key: FTZ_AUTH_EMAIL
+        sync: false        # optional: email for the admin account (needed for emailed password resets)
       - key: FTZ_DB
         value: /data/ftz.db
     disk:
