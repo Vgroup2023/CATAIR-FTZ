@@ -1,0 +1,30 @@
+body.auth{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);min-height:100vh;background:var(--bg)}
+body.auth.solo{grid-template-columns:1fr}
+.hero{background:linear-gradient(160deg,#06122b,#0d2250 55%,#1a3a78);color:#e8eefb;padding:56px clamp(24px,6vw,84px);display:flex;flex-direction:column;justify-content:center;gap:14px}
+.hero-logo{width:min(300px,70%);border-radius:12px;border:1px solid rgba(234,207,134,.5);margin-bottom:12px}
+.hero h1{font-size:clamp(26px,3.4vw,38px);line-height:1.15;margin:0;color:#fff}
+.hero .lead{font-size:16px;color:#c9d6f0;margin:0 0 6px;max-width:34em}
+.points{list-style:none;padding:0;margin:8px 0 0;display:grid;gap:10px;max-width:36em}
+.points li{padding-left:22px;position:relative;color:#dbe5fa}
+.points li:before{content:"";position:absolute;left:0;top:.55em;width:9px;height:9px;border-radius:50%;background:var(--accent)}
+.points b{color:var(--gold-light)}
+.panel{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:16px;padding:32px 20px}
+.auth-card{width:min(420px,100%);padding:26px 26px 20px}
+.auth-card h2{margin:0 0 14px;font-size:22px}
+.auth-card form{display:grid;gap:12px}
+.auth-card input{padding:9px 10px;font-size:15px}
+.wide{width:100%;padding:10px}
+button.ghost{border:0;background:none;color:var(--link);padding:0 4px;font-weight:600}
+.pw{display:flex;align-items:center;gap:6px}.pw input{flex:1}
+.alt{text-align:center;margin:14px 0 0}.alt a{color:var(--link);font-weight:600}
+.hint{color:var(--mute);font-size:13px;margin:0 0 10px}
+.msg{min-height:20px;font-size:13px}.msg.err{color:var(--bad)}.msg.ok{color:var(--ok)}
+.demo{width:min(420px,100%);border-style:dashed}
+.demo h3{margin:0 0 4px}
+.demo dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:8px 0 14px}
+.demo dt{color:var(--mute);font-size:13px}.demo dd{margin:0}
+.demo code{background:var(--infobg);padding:2px 7px;border-radius:4px;font-size:14px;user-select:all}
+.foot{color:var(--mute);font-size:12px;margin:0}
+.mini-logo{display:block;width:120px;margin:0 auto 14px;border-radius:8px;border:1px solid rgba(234,207,134,.6)}
+[hidden]{display:none!important}
+@media (max-width:820px){body.auth{grid-template-columns:1fr}.hero{padding:28px 20px}.hero-logo{width:180px}.points{display:none}}

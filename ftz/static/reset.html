@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Choose a new password - Globlexus FTZ Control</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="auth.css">
+</head>
+<body class="auth solo">
+<main class="panel">
+  <div class="card auth-card">
+    <img class="mini-logo" src="logo.png" alt="Globlexus Group">
+    <h2>Choose a new password</h2>
+    <form id="reset-form">
+      <label>New password
+        <span class="pw"><input name="password" id="newpw" type="password" autocomplete="new-password" required minlength="10">
+        <button type="button" class="sm ghost" data-toggle="newpw">Show</button></span></label>
+      <label>Confirm new password<input name="confirm" id="confirmpw" type="password" autocomplete="new-password" required></label>
+      <p class="hint">At least 10 characters. Avoid your user name and common passwords.</p>
+      <div class="msg" id="reset-msg" role="alert"></div>
+      <button class="primary wide" type="submit">Save password</button>
+    </form>
+    <p class="alt"><a href="/">Back to sign in</a></p>
+  </div>
+</main>
+<script src="auth.js"></script>
+</body>
+</html>
