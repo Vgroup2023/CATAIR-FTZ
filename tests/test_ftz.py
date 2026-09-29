@@ -310,5 +310,41 @@ class TestAtomicityAndHttp(Base):
             srv.shutdown()
 
 
+class TestLogin(unittest.TestCase):
+    def test_basic_auth_required_and_user_recorded(self):
+        import base64
+        from ftz import server
+        os.environ["FTZ_DB"] = os.path.join(tempfile.mkdtemp(), "a.db")
+        os.environ["FTZ_QUIET"] = "1"
+        os.environ["FTZ_USERS"] = "alice:s3cret;bob:pw"
+        srv = server.make_server("127.0.0.1", 0)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+        def call(url, auth=None, method="GET", body=None):
+            h = {"X-User": "spoof"}
+            if auth:
+                h["Authorization"] = "Basic " + base64.b64encode(auth.encode()).decode()
+            req = urllib.request.Request(base + url, method=method, headers=h, data=body)
+            try:
+                with urllib.request.urlopen(req) as r:
+                    return r.status, r.read()
+            except urllib.error.HTTPError as ex:
+                return ex.code, ex.read()
+        try:
+            self.assertEqual(call("/")[0], 401)
+            self.assertEqual(call("/api/lookups")[0], 401)
+            self.assertEqual(call("/api/lookups", "alice:wrong")[0], 401)
+            self.assertEqual(call("/healthz")[0], 200)
+            self.assertEqual(call("/api/lookups", "alice:s3cret")[0], 200)
+            self.assertEqual(call("/", "bob:pw")[0], 200)
+            call("/api/zones", "alice:s3cret", "POST", b'{"zone_no":"Z9","name":"N"}')
+            log = json.loads(call("/api/audit", "alice:s3cret")[1])
+            self.assertEqual(log[0]["user"], "alice")  # not the spoofed X-User header
+        finally:
+            srv.shutdown()
+            del os.environ["FTZ_USERS"]
+
+
 if __name__ == "__main__":
     unittest.main()

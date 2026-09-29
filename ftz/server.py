@@ -1,5 +1,7 @@
 """HTTP server (standard library only): JSON API, printable forms, CSV export, static UI."""
+import base64
 import csv
+import hmac
 import html
 import io
 import json
@@ -8,6 +10,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -124,6 +127,18 @@ def print_page(kind, svc, ident):
             "file through ACE or your broker/customs software.</p><script>window.print&&setTimeout(()=>print(),300)</script>")
 
 
+def load_users():
+    """Login accounts from FTZ_USERS="alice:pw1;bob:pw2" (or FTZ_AUTH_USER + FTZ_AUTH_PASSWORD)."""
+    users = {}
+    for pair in filter(None, (os.environ.get("FTZ_USERS") or "").split(";")):
+        name, _, pw = pair.partition(":")
+        if name.strip() and pw:
+            users[name.strip()] = pw
+    if os.environ.get("FTZ_AUTH_USER") and os.environ.get("FTZ_AUTH_PASSWORD"):
+        users[os.environ["FTZ_AUTH_USER"]] = os.environ["FTZ_AUTH_PASSWORD"]
+    return users
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "FTZ/1.0"
 
@@ -146,8 +161,30 @@ class Handler(BaseHTTPRequestHandler):
     def json(self, code, obj):
         self.send(code, json.dumps(obj, default=str))
 
+    def authenticate(self, users):
+        """HTTP Basic auth; returns the username, or None after sending a 401."""
+        try:
+            kind, _, tok = (self.headers.get("Authorization") or "").partition(" ")
+            name, _, pw = base64.b64decode(tok).decode().partition(":") if kind.lower() == "basic" else ("", "", "")
+        except Exception:
+            name = pw = ""
+        expected = users.get(name)
+        if expected is not None and hmac.compare_digest(expected.encode(), pw.encode()):
+            return name
+        time.sleep(0.5)  # slow down password guessing
+        self.send(401, json.dumps({"errors": ["login required"]}), extra={"WWW-Authenticate": 'Basic realm="FTZ system", charset="UTF-8"'})
+        return None
+
     def handle_any(self, method):
         url = urlparse(self.path)
+        if url.path == "/healthz":
+            return self.send(200, "ok", "text/plain")
+        users = load_users()
+        login = None
+        if users:
+            login = self.authenticate(users)
+            if login is None:
+                return
         path, query = url.path, {k: v[0] for k, v in parse_qs(url.query).items()}
         try:
             if method == "GET" and not path.startswith(("/api/", "/print/", "/export/", "/backup")):
@@ -163,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError("invalid JSON")
                 if not isinstance(body, dict):
                     raise ApiError("JSON object expected")
-            user = (self.headers.get("X-User") or "unknown")[:60]
+            user = login or (self.headers.get("X-User") or "unknown")[:60]  # logged-in name cannot be spoofed
             con = db.connect()
             try:
                 svc = Service(con, user)
@@ -242,7 +279,10 @@ def make_server(host="127.0.0.1", port=8214):
 
 def main():
     host = os.environ.get("FTZ_HOST", "127.0.0.1")
-    port = int(os.environ.get("FTZ_PORT", "8214"))
+    port = int(os.environ.get("FTZ_PORT") or os.environ.get("PORT") or 8214)
+    if host not in ("127.0.0.1", "localhost", "::1") and not load_users():
+        sys.exit("Refusing to listen on a public interface without a login. "
+                 "Set FTZ_AUTH_USER and FTZ_AUTH_PASSWORD (or FTZ_USERS).")
     srv = make_server(host, port)
     print(f"FTZ system on http://{host}:{port}  (database: {db.db_path()})")
     try:
