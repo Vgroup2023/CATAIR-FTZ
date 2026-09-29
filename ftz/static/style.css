@@ -1,13 +1,13 @@
 @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
 :root{--bg:#f6f5f2;--panel:#fff;--ink:#141414;--mute:#706b66;--line:#e0ddd6;--accent:#d0a339;--accent-ink:#141414;--link:#976c20;--gold-light:#eacf86;
 --ok:#1e7d4f;--warn:#a25f00;--bad:#b3261e;--okbg:#e3f4ea;--warnbg:#fff1d6;--badbg:#fde7e5;--infobg:#f7efd9;
---side:linear-gradient(180deg,#5a3a16,#845c1f 55%,#a37a29);--side-ink:#f7eed4}
+--side:linear-gradient(180deg,#06122b,#0d2250 55%,#1a3a78);--side-ink:#e8eefb}
 @media (prefers-color-scheme:dark){:root{--bg:#0a111f;--panel:#111a2c;--ink:#dfe4ec;--mute:#8b95a7;--line:#22304a;--accent:#e4b83b;--accent-ink:#141414;--link:#eacf86;
---ok:#5fd394;--warn:#f0b04a;--bad:#ff8d85;--okbg:#153426;--warnbg:#3a2c10;--badbg:#3f1a17;--infobg:#1d2740;--side:linear-gradient(180deg,#0a111f,#111a2c);--side-ink:#dfe4ec}}
+--ok:#5fd394;--warn:#f0b04a;--bad:#ff8d85;--okbg:#153426;--warnbg:#3a2c10;--badbg:#3f1a17;--infobg:#1d2740;--side:linear-gradient(180deg,#050c1e,#0a1a3d 60%,#12295a);--side-ink:#dfe4ec}}
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.5 'Manrope',system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink);display:flex;min-height:100vh}
 aside{width:220px;background:var(--side);color:var(--side-ink);padding:16px 0;display:flex;flex-direction:column;flex:none;position:sticky;top:0;height:100vh}
-.brand{padding:0 14px 12px}.brand img{display:block;width:100%;border-radius:8px;border:1px solid rgba(234,207,134,.45)}.brand small{display:block;text-align:center;margin-top:8px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold-light)}
+.brand{padding:0 14px 10px;text-align:center}.brand img{display:block;width:110px;margin:0 auto;border-radius:8px;border:1px solid rgba(234,207,134,.45)}.brand small{display:block;margin-top:6px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold-light)}
 nav a{display:block;padding:9px 18px;color:var(--side-ink);text-decoration:none;cursor:pointer;border-left:3px solid transparent}
 nav a:hover{background:rgba(255,255,255,.08)}nav a.on{background:rgba(255,255,255,.14);border-left-color:var(--gold-light);color:#fff;font-weight:700}
 nav .sep{font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.55;padding:14px 18px 4px}
