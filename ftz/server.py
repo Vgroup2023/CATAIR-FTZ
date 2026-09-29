@@ -156,7 +156,8 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(data)
+        if self.command != "HEAD":  # HEAD gets the same headers, no body
+            self.wfile.write(data)
 
     def json(self, code, obj):
         self.send(code, json.dumps(obj, default=str))
@@ -266,6 +267,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, data, ctype + ("; charset=utf-8" if ctype.startswith("text") or "javascript" in ctype else ""))
 
     def do_GET(self): self.handle_any("GET")
+    def do_HEAD(self): self.handle_any("GET")
     def do_POST(self): self.handle_any("POST")
     def do_PUT(self): self.handle_any("PUT")
 

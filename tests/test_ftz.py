@@ -336,6 +336,8 @@ class TestLogin(unittest.TestCase):
             self.assertEqual(call("/api/lookups")[0], 401)
             self.assertEqual(call("/api/lookups", "alice:wrong")[0], 401)
             self.assertEqual(call("/healthz")[0], 200)
+            self.assertEqual(call("/healthz", method="HEAD")[0], 200)  # Render health checks may use HEAD
+            self.assertEqual(call("/", method="HEAD")[0], 401)
             self.assertEqual(call("/api/lookups", "alice:s3cret")[0], 200)
             self.assertEqual(call("/", "bob:pw")[0], 200)
             call("/api/zones", "alice:s3cret", "POST", b'{"zone_no":"Z9","name":"N"}')
