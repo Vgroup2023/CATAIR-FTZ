@@ -12,10 +12,12 @@ The server refuses to listen on a public interface unless a login is configured.
 Login is HTTP Basic auth, so **always serve over HTTPS** — the options below do. The signed-in name is written to the audit log and cannot be spoofed. There is one shared database, so run a **single instance**.
 
 ## Option A — Render (least work)
+`render.yaml` is the **free test plan**: no disk, so data is wiped on every restart/redeploy/sleep — sample data only. For real records, rename `render.paid.yaml` to `render.yaml` (paid plan + 1 GB disk) before step 1.
+
 1. Render dashboard → **New → Blueprint** → select this repo (it reads `render.yaml`).
 2. When prompted, enter `FTZ_AUTH_PASSWORD` (long, unique). Change `FTZ_AUTH_USER` if you like.
 3. Deploy. Your URL is `https://ftz-system.onrender.com` (or similar). Browser asks for the login.
-4. The 1 GB disk needs a paid plan; without a disk the database is wiped on every deploy.
+4. Free plan: the service sleeps after ~15 minutes idle (first visit then takes about a minute). The 1 GB disk in `render.paid.yaml` needs a paid plan.
 
 ## Option B — VPS (Ubuntu, any $5 host) with automatic HTTPS
 Point a DNS `A` record (e.g. `ftz.example.com`) at the server, then:
