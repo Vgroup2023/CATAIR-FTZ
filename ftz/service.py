@@ -2,30 +2,15 @@
 import json
 
 from . import rules
-from .db import audit, next_no, now, one, rows
+from .common import ApiError, need, pick, proportional, r4, round_q  # noqa: F401  (re-exported for other modules)
+from .db import MOVE_FIELDS, audit, chain_hash, last_hash, next_no, now, one, rows
+from .integration import IntegrationMixin
+from .recon import ReconMixin
+
+EPS = 1e-4
 
 
-class ApiError(Exception):
-    def __init__(self, errors, status=400):
-        self.errors = [errors] if isinstance(errors, str) else list(errors)
-        self.status = status
-        super().__init__("; ".join(self.errors))
-
-
-def need(cond, msg, status=400):
-    if not cond:
-        raise ApiError(msg, status)
-
-
-def pick(d, keys):
-    return {k: (d.get(k) if d.get(k) != "" else None) for k in keys}
-
-
-def round_q(x):
-    return round(float(x), 4)
-
-
-class Service:
+class Service(IntegrationMixin, ReconMixin):
     def __init__(self, con, user="unknown"):
         self.con, self.user = con, user or "unknown"
 
@@ -36,7 +21,10 @@ class Service:
     def set_settings(self, data):
         for k, v in data.items():
             need(k in rules.DEFAULT_SETTINGS, f"unknown setting {k}")
-            need(str(v).isdigit() and int(v) > 0, f"{k} must be a positive whole number")
+            if k in rules.CHOICE_SETTINGS:
+                need(str(v) in rules.CHOICE_SETTINGS[k], f"{k} must be one of: {', '.join(rules.CHOICE_SETTINGS[k])}")
+            else:
+                need(str(v).isdigit() and int(v) > 0, f"{k} must be a positive whole number")
             self.con.execute("UPDATE settings SET value=? WHERE key=?", (str(v), k))
         audit(self.con, self.user, "update", "settings", "-", data)
         return self.settings()
@@ -72,17 +60,20 @@ class Service:
     # ----------------------------------------------------------- admissions (e214)
     ADM_FIELDS = ["zone_id", "operator_id", "importer_id", "carrier_id", "transport_mode", "transport_doc",
                   "vessel_voyage", "port_of_entry", "entry_date", "inbond_ref", "census_stat", "remarks"]
-    LINE_FIELDS = ["description", "htsus", "coo", "qty", "uom", "value", "zone_status", "duty_rate", "marks", "location"]
+    LINE_FIELDS = ["part_no", "description", "htsus", "coo", "qty", "uom", "qty2", "uom2", "value", "zone_status",
+                   "duty_rate", "marks", "location", "pga_ref"]
 
     def _clean_lines(self, lines):
         out = []
         for ln in lines or []:
             c = pick(ln, self.LINE_FIELDS)
+            c["part_no"] = (c["part_no"] or "").strip() or None
+            for k in ("qty", "qty2", "value", "duty_rate"):
+                c[k] = rules.num(c[k])
+            self._apply_part_defaults(c)          # product master fills whatever the line left blank
             c["zone_status"] = (c["zone_status"] or "").upper()
             c["htsus"] = rules.normalize_hts(c["htsus"]) or None
             c["coo"] = (c["coo"] or "").upper() or None
-            for k in ("qty", "value", "duty_rate"):
-                c[k] = rules.num(c[k])
             if c["zone_status"] != "PF":
                 c["duty_rate"] = None
             out.append(c)
@@ -148,9 +139,9 @@ class Service:
         st = a["status"]
         if action == "submit":
             need(st == "draft", "only drafts can be submitted")
-            errs = rules.validate_admission(a, a["lines"])
-            if errs:
-                raise ApiError(errs)
+            chk = self.admission_check(adm_id)      # basic rules, plus WMS mismatches when they are set to block
+            if chk["errors"]:
+                raise ApiError(chk["errors"])
             new = "submitted"
         elif action == "approve":
             need(st == "submitted", "only submitted e214s can be approved")
@@ -179,25 +170,93 @@ class Service:
     def _create_lots(self, a):
         for ln in a["lines"]:
             lot_no = f"{a['doc_no']}-L{ln['line_no']}"
+            q2 = ln["qty2"] if ln.get("uom2") else None
             cur = self.con.execute(
-                """INSERT INTO lots(lot_no,admission_id,line_id,zone_id,description,htsus,coo,uom,zone_status,
-                   unit_value,duty_rate,qty_admitted,qty_on_hand,location,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (lot_no, a["id"], ln["id"], a["zone_id"], ln["description"], ln["htsus"], ln["coo"], ln["uom"],
-                 ln["zone_status"], ln["value"] / ln["qty"], ln["duty_rate"], ln["qty"], ln["qty"],
-                 ln["location"], now()))
-            self._move(cur.lastrowid, "admit", ln["qty"], ln["value"], "e214", a["doc_no"])
+                """INSERT INTO lots(lot_no,admission_id,line_id,zone_id,part_no,description,htsus,coo,uom,uom2,zone_status,
+                   unit_value,duty_rate,qty_admitted,qty_on_hand,qty2_admitted,qty2_on_hand,qty2_out,location,received_on,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (lot_no, a["id"], ln["id"], a["zone_id"], ln["part_no"], ln["description"], ln["htsus"], ln["coo"], ln["uom"],
+                 ln["uom2"] if q2 else None, ln["zone_status"], ln["value"] / ln["qty"], ln["duty_rate"], ln["qty"], ln["qty"],
+                 q2, q2, 0.0 if q2 is not None else None, ln["location"], a["entry_date"], now()))
+            self._move(cur.lastrowid, "admit", ln["qty"], ln["value"], "e214", a["doc_no"], qty2=q2)
 
     # ---------------------------------------------------------------- inventory
-    def _move(self, lot_id, kind, qty, value, ref_type, ref_no, note=None, duty=None):
+    def _move(self, lot_id, kind, qty, value, ref_type, ref_no, note=None, duty=None, qty2=None):
+        rec = dict(ts=now(), lot_id=lot_id, kind=kind, qty=qty, qty2=qty2, value=value, ref_type=ref_type, ref_no=ref_no,
+                   note=note, user=self.user, duty=duty)
+        prev = last_hash(self.con, "movements")
+        h = chain_hash(prev, *[rec[f] for f in MOVE_FIELDS])
         self.con.execute(
-            "INSERT INTO movements(ts,lot_id,kind,qty,value,ref_type,ref_no,note,user,duty) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (now(), lot_id, kind, qty, value, ref_type, ref_no, note, self.user, duty))
+            f"INSERT INTO movements({','.join(MOVE_FIELDS)},prev_hash,hash) VALUES({','.join('?' * (len(MOVE_FIELDS) + 2))})",
+            [rec[f] for f in MOVE_FIELDS] + [prev, h])
 
     def _lot(self, lot_id):
         lot = one(self.con, "SELECT * FROM lots WHERE id=?", (lot_id,))
         need(lot, "lot not found", 404)
         return lot
+
+    def _bump(self, lot_id, on=0.0, out=0.0, on2=0.0, out2=0.0):
+        """Change a lot's balances. The database itself refuses to let them go negative."""
+        self.con.execute(
+            """UPDATE lots SET qty_on_hand=ROUND(qty_on_hand+?,4), qty_out=ROUND(qty_out+?,4),
+               qty2_on_hand=CASE WHEN qty2_on_hand IS NULL THEN NULL ELSE ROUND(qty2_on_hand+?,4) END,
+               qty2_out=CASE WHEN qty2_out IS NULL THEN NULL ELSE ROUND(qty2_out+?,4) END WHERE id=?""",
+            (on, out, on2, out2, lot_id))
+
+    def _take(self, lot, q, to_out=False):
+        """Remove q from a lot's on-hand pool; returns the matching customs-unit quantity (or None)."""
+        q2 = proportional(lot["qty2_on_hand"], lot["qty_on_hand"], q)
+        self._bump(lot["id"], -q, q if to_out else 0.0, -(q2 or 0.0), (q2 or 0.0) if to_out else 0.0)
+        return q2
+
+    def _give(self, lot, q, q2, from_out=False):
+        """Put q (and its customs quantity) back on hand, from the temporary-removal pool when from_out."""
+        self._bump(lot["id"], q, -q if from_out else 0.0, q2 or 0.0, -(q2 or 0.0) if from_out else 0.0)
+
+    def _admitted_on_or_before(self, lot, date, what):
+        need(rules.parse_date(date), f"{what} date must be YYYY-MM-DD")
+        need(date >= (lot["received_on"] or ""),
+             f"{what} is dated {date}, before lot {lot['lot_no']} was admitted on {lot['received_on']}: "
+             "merchandise cannot leave the zone before it has been admitted")
+
+    def _identity(self, lot):
+        return lot["part_no"] or f"{lot['description']}|{lot['htsus'] or ''}"
+
+    def _fifo_check(self, demand):
+        """Enforce first-in-first-out. `demand` maps lot id -> quantity this operation will take.
+
+        Older lots of the same item (same zone, status and part) must be emptied first; older stock that
+        the same operation also takes counts as used.
+        """
+        if self.settings().get("inventory_method", "fifo") != "fifo":
+            return
+        for lot_id in demand:
+            lot = self._lot(lot_id)
+            older = rows(self.con, """SELECT id, lot_no, received_on, qty_on_hand FROM lots
+                WHERE zone_id=? AND zone_status=? AND COALESCE(part_no, description||'|'||COALESCE(htsus,''))=?
+                AND qty_on_hand>0.00005 AND id<>? AND (COALESCE(received_on,'')<? OR (COALESCE(received_on,'')=? AND id<?))
+                ORDER BY received_on, id""",
+                (lot["zone_id"], lot["zone_status"], self._identity(lot), lot["id"],
+                 lot["received_on"] or "", lot["received_on"] or "", lot["id"]))
+            for o in older:
+                if o["qty_on_hand"] - demand.get(o["id"], 0) > EPS:
+                    raise ApiError(f"FIFO: lot {o['lot_no']} (received {o['received_on']}, {r4(o['qty_on_hand'])} still on hand) "
+                                   f"must be used before lot {lot['lot_no']}. Use 'FIFO withdraw' to draw oldest stock first, "
+                                   "or change the inventory method in Setup if CBP has approved an alternative.")
+
+    def stock_summary(self):
+        """On-hand stock grouped by item, oldest lot first, for FIFO withdrawals."""
+        out = {}
+        for l in rows(self.con, "SELECT l.*, z.zone_no FROM lots l JOIN zones z ON z.id=l.zone_id WHERE l.qty_on_hand>0.00005 ORDER BY received_on, id"):
+            k = (l["zone_id"], l["zone_status"], self._identity(l))
+            g = out.setdefault(k, {"key": self._identity(l), "zone_id": l["zone_id"], "zone_no": l["zone_no"], "zone_status": l["zone_status"],
+                                   "part_no": l["part_no"], "description": l["description"], "htsus": l["htsus"], "uom": l["uom"],
+                                   "uom2": l["uom2"], "on_hand": 0.0, "on_hand2": None, "lots": 0, "oldest_received": l["received_on"]})
+            g["on_hand"] = r4(g["on_hand"] + l["qty_on_hand"])
+            if l["qty2_on_hand"] is not None:
+                g["on_hand2"] = r4((g["on_hand2"] or 0) + l["qty2_on_hand"])
+            g["lots"] += 1
+        return list(out.values())
 
     def list_lots(self, status=None, zone_id=None, only_stock=False):
         sql = """SELECT l.*, z.zone_no FROM lots l LEFT JOIN zones z ON z.id=l.zone_id WHERE 1=1"""
@@ -221,23 +280,31 @@ class Service:
         delta = rules.num(d.get("delta"))
         need(delta and delta != 0, "adjustment quantity must be non-zero")
         need(str(d.get("reason") or "").strip(), "a reason is required for inventory adjustments")
-        need(lot["qty_on_hand"] + delta >= 0, "adjustment would make on-hand negative")
-        self.con.execute("UPDATE lots SET qty_on_hand=? WHERE id=?", (round_q(lot["qty_on_hand"] + delta), lot["id"]))
-        self._move(lot["id"], "adjust", delta, delta * lot["unit_value"], "adjustment", None, d["reason"])
+        need(lot["qty_on_hand"] + delta >= -EPS, "adjustment would make on-hand negative")
+        if lot["qty2_on_hand"] is None:
+            q2 = None
+        elif delta < 0:
+            q2 = -proportional(lot["qty2_on_hand"], lot["qty_on_hand"], -delta)
+        else:
+            q2 = rules.num(d.get("delta2"))
+            if q2 is None and lot["qty_admitted"]:
+                q2 = r4(delta * lot["qty2_admitted"] / lot["qty_admitted"])
+        self._bump(lot["id"], delta, 0.0, q2 or 0.0, 0.0)
+        self._move(lot["id"], "adjust", delta, delta * lot["unit_value"], "adjustment", None, d["reason"], qty2=q2)
         audit(self.con, self.user, "adjust", "lot", lot["id"], d)
         return self._lot(lot["id"])
 
     def withdraw(self, d):
-        """Withdraw from the zone to U.S. consumption or to export (for in-bond use create_inbond)."""
+        """Withdraw from the zone to U.S. consumption, export or another zone (for in-bond use create_inbond)."""
         lot = self._lot(d.get("lot_id"))
         kind = d.get("kind")
         need(kind in ("consumption", "export", "transfer"), "kind must be consumption, export or transfer")
         q = rules.num(d.get("qty"))
         need(q and q > 0, "quantity must be greater than 0")
-        need(q <= lot["qty_on_hand"] + 1e-9, f"only {lot['qty_on_hand']} {lot['uom']} on hand")
-        date = d.get("date")
-        need(rules.parse_date(date), "withdrawal date must be YYYY-MM-DD")
-        duty, note = None, None
+        need(q <= lot["qty_on_hand"] + EPS, f"only {lot['qty_on_hand']} {lot['uom']} on hand")
+        self._admitted_on_or_before(lot, d.get("date"), "withdrawal")
+        self._fifo_check({lot["id"]: q})
+        duty, note, dest = None, None, None
         if kind == "consumption":
             need(lot["zone_status"] != "ZR",
                  "zone-restricted merchandise may not enter U.S. commerce: export, destroy or move it in-bond (TE/IE)")
@@ -255,18 +322,44 @@ class Service:
             need(dest["id"] != lot["zone_id"], "destination zone must differ from the current zone")
             need(str(d.get("export_ref") or "").strip(), "transfer reference (e214 at destination / 7512) is required")
             note = f"transfer to {dest['zone_no']} ref {d['export_ref']}"
+        q2 = self._take(lot, q)
+        if dest:
             new_no = f"{lot['lot_no']}-T{dest['id']}-{next_no(self.con, 'XFR', now()[:4])[-4:]}"
             cur = self.con.execute(
-                """INSERT INTO lots(lot_no,admission_id,line_id,zone_id,description,htsus,coo,uom,zone_status,unit_value,
-                   duty_rate,qty_admitted,qty_on_hand,location,parent_lot_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (new_no, lot["admission_id"], lot["line_id"], dest["id"], lot["description"], lot["htsus"], lot["coo"],
-                 lot["uom"], lot["zone_status"], lot["unit_value"], lot["duty_rate"], q, q, None, lot["id"], now()))
-            self._move(cur.lastrowid, "transfer_in", q, q * lot["unit_value"], "transfer", d["export_ref"], f"from {lot['lot_no']}")
-        self.con.execute("UPDATE lots SET qty_on_hand=? WHERE id=?", (round_q(lot["qty_on_hand"] - q), lot["id"]))
+                """INSERT INTO lots(lot_no,admission_id,line_id,zone_id,part_no,description,htsus,coo,uom,uom2,zone_status,unit_value,
+                   duty_rate,qty_admitted,qty_on_hand,qty2_admitted,qty2_on_hand,qty2_out,location,received_on,parent_lot_id,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (new_no, lot["admission_id"], lot["line_id"], dest["id"], lot["part_no"], lot["description"], lot["htsus"], lot["coo"],
+                 lot["uom"], lot["uom2"], lot["zone_status"], lot["unit_value"], lot["duty_rate"], q, q, q2, q2,
+                 0.0 if q2 is not None else None, None, lot["received_on"], lot["id"], now()))
+            self._move(cur.lastrowid, "transfer_in", q, q * lot["unit_value"], "transfer", d["export_ref"], f"from {lot['lot_no']}", qty2=q2)
         self._move(lot["id"], f"withdraw_{kind}" if kind != "transfer" else "transfer_out", -q, -q * lot["unit_value"],
-                   "withdrawal", d.get("entry_no") or d.get("export_ref"), note, duty)
+                   "withdrawal", d.get("entry_no") or d.get("export_ref"), note, duty, qty2=-q2 if q2 is not None else None)
         audit(self.con, self.user, "withdraw", "lot", lot["id"], {**d, "duty": duty})
         return {"lot": self._lot(lot["id"]), "estimated_duty": duty}
+
+    def withdraw_fifo(self, d):
+        """Withdraw a quantity of one item, drawing the oldest lots first (splits across lots as needed)."""
+        q = rules.num(d.get("qty"))
+        need(q and q > 0, "quantity must be greater than 0")
+        lots = [l for l in rows(self.con, """SELECT * FROM lots WHERE zone_id=? AND zone_status=? AND qty_on_hand>0.00005
+                                             ORDER BY received_on, id""", (d.get("zone_id"), d.get("zone_status")))
+                if self._identity(l) == d.get("key")]
+        need(lots, "no stock of that item in this zone and status")
+        total = r4(sum(l["qty_on_hand"] for l in lots))
+        need(q <= total + EPS, f"only {total} available across {len(lots)} lot(s)")
+        left, out, duty = q, [], 0.0
+        for l in lots:
+            take = min(left, l["qty_on_hand"])
+            if take <= EPS:
+                break
+            r = self.withdraw({**d, "lot_id": l["id"], "qty": r4(take)})
+            out.append({"lot_no": l["lot_no"], "qty": r4(take), "estimated_duty": r["estimated_duty"]})
+            duty += r["estimated_duty"] or 0.0
+            left = r4(left - take)
+            if left <= EPS:
+                break
+        return {"allocations": out, "estimated_duty": round(duty, 2) if d.get("kind") == "consumption" else None}
 
     # ------------------------------------------------------------ permits (e216)
     def save_permit(self, d):
@@ -327,9 +420,10 @@ class Service:
         need(ok, "e216 check failed: " + why)
         q = rules.num(d.get("qty"))
         need(q and q > 0, "quantity must be greater than 0")
-        need(q <= lot["qty_on_hand"] + 1e-9, f"only {lot['qty_on_hand']} {lot['uom']} on hand")
+        need(q <= lot["qty_on_hand"] + EPS, f"only {lot['qty_on_hand']} {lot['uom']} on hand")
+        self._admitted_on_or_before(lot, d.get("performed_on"), "activity")
         act_no = next_no(self.con, "ACT", now()[:4])
-        out_lot_id, out_qty, status = None, None, "done"
+        out_lot_id, out_qty, status, act_q2 = None, None, "done", None
         loc = d.get("location") or None
         if kind == "manipulate":
             self.con.execute("UPDATE lots SET location=COALESCE(?,location), description=COALESCE(?,description) WHERE id=?",
@@ -340,15 +434,14 @@ class Service:
             self._move(lot["id"], "exhibit", 0, 0, "e216", act_no, d.get("note"))
         elif kind == "destroy":
             need(str(d.get("note") or "").strip(), "describe the destruction method / scrap or waste disposition")
-            self.con.execute("UPDATE lots SET qty_on_hand=? WHERE id=?", (round_q(lot["qty_on_hand"] - q), lot["id"]))
-            self._move(lot["id"], "destroy", -q, -q * lot["unit_value"], "e216", act_no, d.get("note"))
+            q2 = self._take(lot, q)
+            self._move(lot["id"], "destroy", -q, -q * lot["unit_value"], "e216", act_no, d.get("note"), qty2=-q2 if q2 is not None else None)
         elif kind == "temp_removal":
             need(rules.parse_date(d.get("expected_return")), "expected return date is required (YYYY-MM-DD)")
             need(d["expected_return"] >= d["performed_on"], "expected return cannot be before removal date")
             need(lot["zone_status"] != "ZR", "zone-restricted merchandise may not be removed for return to commerce")
-            self.con.execute("UPDATE lots SET qty_on_hand=?, qty_out=? WHERE id=?",
-                             (round_q(lot["qty_on_hand"] - q), round_q(lot["qty_out"] + q), lot["id"]))
-            self._move(lot["id"], "temp_out", -q, -q * lot["unit_value"], "e216", act_no, d.get("note"))
+            act_q2 = self._take(lot, q, to_out=True)
+            self._move(lot["id"], "temp_out", -q, -q * lot["unit_value"], "e216", act_no, d.get("note"), qty2=-act_q2 if act_q2 is not None else None)
             status = "open"
         elif kind == "manufacture":
             out_qty = rules.num(d.get("output_qty"))
@@ -357,21 +450,26 @@ class Service:
             oh = rules.normalize_hts(d.get("output_htsus"))
             need(rules.HTS_RE.match(oh), "finished-goods HTSUS (10 digits) is required")
             need(str(d.get("output_uom") or "").strip(), "finished-goods unit of measure is required")
-            self.con.execute("UPDATE lots SET qty_on_hand=? WHERE id=?", (round_q(lot["qty_on_hand"] - q), lot["id"]))
-            self._move(lot["id"], "manufacture_in", -q, -q * lot["unit_value"], "e216", act_no, d.get("note"))
+            out2, uom2 = rules.num(d.get("output_qty2")), (d.get("output_uom2") or "").strip() or None
+            need((out2 is None) == (uom2 is None) and (out2 is None or out2 > 0), "give both a customs quantity and unit for the finished goods, or neither")
+            self._fifo_check({lot["id"]: q})
+            q2 = self._take(lot, q)
+            self._move(lot["id"], "manufacture_in", -q, -q * lot["unit_value"], "e216", act_no, d.get("note"), qty2=-q2 if q2 is not None else None)
             lot_no = f"{lot['lot_no']}-M{act_no[-4:]}"
             cur = self.con.execute(
-                """INSERT INTO lots(lot_no,admission_id,line_id,zone_id,description,htsus,coo,uom,zone_status,unit_value,
-                   duty_rate,qty_admitted,qty_on_hand,location,parent_lot_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (lot_no, lot["admission_id"], lot["line_id"], lot["zone_id"], d["output_desc"], oh, lot["coo"],
-                 d["output_uom"], lot["zone_status"], q * lot["unit_value"] / out_qty, lot["duty_rate"],
-                 out_qty, out_qty, loc or lot["location"], lot["id"], now()))
+                """INSERT INTO lots(lot_no,admission_id,line_id,zone_id,part_no,description,htsus,coo,uom,uom2,zone_status,unit_value,
+                   duty_rate,qty_admitted,qty_on_hand,qty2_admitted,qty2_on_hand,qty2_out,location,received_on,parent_lot_id,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (lot_no, lot["admission_id"], lot["line_id"], lot["zone_id"], (d.get("output_part_no") or "").strip() or None,
+                 d["output_desc"], oh, lot["coo"], d["output_uom"], uom2, lot["zone_status"], q * lot["unit_value"] / out_qty,
+                 lot["duty_rate"], out_qty, out_qty, out2, out2, 0.0 if out2 is not None else None, loc or lot["location"],
+                 d["performed_on"], lot["id"], now()))
             out_lot_id = cur.lastrowid
-            self._move(out_lot_id, "manufacture_out", out_qty, q * lot["unit_value"], "e216", act_no, d.get("note"))
+            self._move(out_lot_id, "manufacture_out", out_qty, q * lot["unit_value"], "e216", act_no, d.get("note"), qty2=out2)
         cur = self.con.execute(
-            """INSERT INTO activities(act_no,permit_id,lot_id,kind,qty,output_qty,output_desc,output_htsus,output_lot_id,
-               performed_on,location,note,expected_return,status,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (act_no, permit["id"], lot["id"], kind, q, out_qty, d.get("output_desc"), d.get("output_htsus"), out_lot_id,
+            """INSERT INTO activities(act_no,permit_id,lot_id,kind,qty,qty2,output_qty,output_desc,output_htsus,output_lot_id,
+               performed_on,location,note,expected_return,status,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (act_no, permit["id"], lot["id"], kind, q, act_q2, out_qty, d.get("output_desc"), d.get("output_htsus"), out_lot_id,
              d["performed_on"], loc, d.get("note"), d.get("expected_return") or None, status, self.user, now()))
         audit(self.con, self.user, "perform", "activity", cur.lastrowid, {"act_no": act_no, "kind": kind, "lot": lot["lot_no"]})
         return one(self.con, "SELECT * FROM activities WHERE id=?", (cur.lastrowid,))
@@ -385,9 +483,9 @@ class Service:
         need(q and 0 < q <= outstanding + 1e-9, f"return quantity must be between 0 and {outstanding}")
         need(rules.parse_date(d.get("date")), "return date must be YYYY-MM-DD")
         lot = self._lot(a["lot_id"])
-        self.con.execute("UPDATE lots SET qty_on_hand=?, qty_out=? WHERE id=?",
-                         (round_q(lot["qty_on_hand"] + q), round_q(lot["qty_out"] - q), lot["id"]))
-        self._move(lot["id"], "temp_in", q, q * lot["unit_value"], "e216", a["act_no"], d.get("note"))
+        q2 = proportional(lot["qty2_out"], lot["qty_out"], q)
+        self._give(lot, q, q2, from_out=True)
+        self._move(lot["id"], "temp_in", q, q * lot["unit_value"], "e216", a["act_no"], d.get("note"), qty2=q2)
         done = q >= outstanding - 1e-9
         self.con.execute("UPDATE activities SET returned_qty=?, returned_on=?, status=? WHERE id=?",
                          (round_q(a["returned_qty"] + q), d["date"], "returned" if done else "open", act_id))
@@ -415,12 +513,12 @@ class Service:
                 q = rules.num(ln.get("qty"))
                 need(q and q > 0, "line quantity must be greater than 0")
                 need(h.get("zone_id") is None or lot["zone_id"] == int(h["zone_id"]), f"lot {lot['lot_no']} is in a different zone")
-                lines.append({"lot_id": lot["id"], "description": lot["description"], "htsus": lot["htsus"],
+                lines.append({"lot_id": lot["id"], "part_no": lot["part_no"], "description": lot["description"], "htsus": lot["htsus"],
                               "coo": lot["coo"], "qty": q, "uom": lot["uom"], "value": round(q * lot["unit_value"], 2),
-                              "zone_status": lot["zone_status"]})
+                              "zone_status": lot["zone_status"], "qty2": None})
             else:
                 c = self._clean_lines([ln])[0]
-                lines.append({"lot_id": None, **{k: c[k] for k in ("description", "htsus", "coo", "qty", "uom", "value", "zone_status")}})
+                lines.append({"lot_id": None, **{k: c[k] for k in ("part_no", "description", "htsus", "coo", "qty", "uom", "qty2", "value", "zone_status")}})
         errs = rules.validate_inbond(h, lines)
         if errs:
             raise ApiError(errs)
@@ -431,19 +529,22 @@ class Service:
                 want[ln["lot_id"]] = want.get(ln["lot_id"], 0) + ln["qty"]
         for lot_id, q in want.items():
             lot = self._lot(lot_id)
-            need(q <= lot["qty_on_hand"] + 1e-9, f"lot {lot['lot_no']}: only {lot['qty_on_hand']} {lot['uom']} on hand")
+            need(q <= lot["qty_on_hand"] + EPS, f"lot {lot['lot_no']}: only {lot['qty_on_hand']} {lot['uom']} on hand")
+            self._admitted_on_or_before(lot, h["issued_date"], "in-bond issue")
+        self._fifo_check(want)
         doc_no = next_no(self.con, f"IB-{h['type']}", now()[:4])
         due = rules.add_days(h["issued_date"], self._int(f"transit_days_{h['type']}"))
         cols = list(h) + ["doc_no", "due_date", "status", "created_by", "created_at"]
         cur = self.con.execute(f"INSERT INTO inbonds({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
                                list(h.values()) + [doc_no, due, "issued", self.user, now()])
         ib_id = cur.lastrowid
-        self._save_lines("inbond_lines", "inbond_id", ib_id, lines)
         for ln in lines:
             if ln["lot_id"]:
                 lot = self._lot(ln["lot_id"])
-                self.con.execute("UPDATE lots SET qty_on_hand=? WHERE id=?", (round_q(lot["qty_on_hand"] - ln["qty"]), lot["id"]))
-                self._move(lot["id"], "withdraw_inbond", -ln["qty"], -ln["value"], "7512", doc_no, h["type"])
+                ln["qty2"] = self._take(lot, ln["qty"])
+                self._move(lot["id"], "withdraw_inbond", -ln["qty"], -ln["value"], "7512", doc_no, h["type"],
+                           qty2=-ln["qty2"] if ln["qty2"] is not None else None)
+        self._save_lines("inbond_lines", "inbond_id", ib_id, lines)
         audit(self.con, self.user, "create", "inbond", ib_id, {"doc_no": doc_no, "type": h["type"]})
         return self.get_inbond(ib_id)
 
@@ -500,8 +601,8 @@ class Service:
             for ln in ib["lines"]:
                 if ln["lot_id"]:
                     lot = self._lot(ln["lot_id"])
-                    self.con.execute("UPDATE lots SET qty_on_hand=? WHERE id=?", (round_q(lot["qty_on_hand"] + ln["qty"]), lot["id"]))
-                    self._move(lot["id"], "inbond_cancel", ln["qty"], ln["value"], "7512", ib["doc_no"], "cancelled")
+                    self._give(lot, ln["qty"], ln["qty2"])
+                    self._move(lot["id"], "inbond_cancel", ln["qty"], ln["value"], "7512", ib["doc_no"], "cancelled", qty2=ln["qty2"])
             self.con.execute("UPDATE inbonds SET status='cancelled' WHERE id=?", (ib_id,))
         else:
             raise ApiError("unknown action", 404)
@@ -528,7 +629,25 @@ class Service:
             "removals_open": [a for a in acts if a["status"] == "open"],
             "removals_overdue": [a for a in acts if a["overdue"]],
             "submitted_admissions": rows(self.con, "SELECT id, doc_no FROM admissions WHERE status='submitted'"),
+            "recon": self._recon_brief(),
         }
+
+    def _recon_brief(self):
+        last = one(self.con, "SELECT id, run_at, kind, issues FROM recon_runs ORDER BY id DESC LIMIT 1")
+        return last
+
+    def entry_worksheet(self, entry_no):
+        """Everything needed for a CBP 3461 / 7501 consumption entry, taken from the ledger (no re-keying)."""
+        lines = rows(self.con, """SELECT m.ts, m.qty, m.qty2, m.value, m.duty, l.lot_no, l.part_no, l.description, l.htsus, l.coo,
+                                  l.uom, l.uom2, l.zone_status, l.unit_value, l.duty_rate, a.doc_no admission_no, a.cbp_ref admission_ref,
+                                  a.transport_doc
+                                  FROM movements m JOIN lots l ON l.id=m.lot_id LEFT JOIN admissions a ON a.id=l.admission_id
+                                  WHERE m.kind='withdraw_consumption' AND m.ref_no=? ORDER BY m.id""", (entry_no,))
+        need(lines, "no consumption withdrawals found for that entry number", 404)
+        for l in lines:
+            l["qty"], l["qty2"], l["entered_value"] = -l["qty"], (-l["qty2"] if l["qty2"] is not None else None), round(-l["value"], 2)
+        return {"entry_no": entry_no, "lines": lines, "total_value": round(sum(l["entered_value"] for l in lines), 2),
+                "total_duty": round(sum(l["duty"] or 0 for l in lines), 2)}
 
     def weekly_entries(self):
         """Consumption withdrawals grouped by week - the basis for a weekly entry filing."""
@@ -558,4 +677,5 @@ class Service:
             "zone_statuses": rules.ZONE_STATUSES, "activities": rules.ACTIVITIES,
             "permit_kinds": rules.PERMIT_KINDS, "inbond_types": rules.INBOND_TYPES, "modes": rules.MODES,
             "party_kinds": rules.PARTY_KINDS, "settings": self.settings(),
+            "parts": rows(self.con, "SELECT part_no, description, htsus, coo, uom, uom2, conv, duty_rate, default_status, pga_agencies, active FROM parts WHERE active=1 ORDER BY part_no"),
         }

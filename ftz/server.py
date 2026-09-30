@@ -8,10 +8,12 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
-from . import auth, db, rules
+from . import auth, db, integration, rules
+from . import recon
 from .auth import LIMITS
 from .db import audit
 from .demo import seed_demo_data
@@ -41,12 +43,25 @@ def routes():
     add("POST", "/api/admissions", lambda s, m, b, q: s.save_admission(b))
     add("GET", r"/api/admissions/(\d+)", lambda s, m, b, q: s.get_admission(int(m[1])))
     add("PUT", r"/api/admissions/(\d+)", lambda s, m, b, q: s.save_admission(b, int(m[1])))
+    add("GET", r"/api/admissions/(\d+)/check", lambda s, m, b, q: s.admission_check(int(m[1])))
     add("POST", r"/api/admissions/(\d+)/(submit|approve|reject|delete)", lambda s, m, b, q: s.admission_action(int(m[1]), m[2], b))
     # inventory
     add("GET", "/api/lots", lambda s, m, b, q: s.list_lots(q.get("status"), q.get("zone_id"), q.get("stock") == "1"))
     add("GET", r"/api/lots/(\d+)/movements", lambda s, m, b, q: s.lot_movements(int(m[1])))
+    add("GET", "/api/stock", lambda s, m, b, q: s.stock_summary())
     add("POST", "/api/adjustments", lambda s, m, b, q: s.adjust(b))
     add("POST", "/api/withdrawals", lambda s, m, b, q: s.withdraw(b))
+    add("POST", "/api/withdrawals/fifo", lambda s, m, b, q: s.withdraw_fifo(b))
+    # product master, WMS feeds, reconciliation
+    add("GET", "/api/parts", lambda s, m, b, q: s.list_parts())
+    add("POST", "/api/parts", lambda s, m, b, q: s.upsert_part(b))
+    add("POST", "/api/parts/import", lambda s, m, b, q: s.import_parts(b))
+    add("GET", "/api/wms", lambda s, m, b, q: s.list_wms())
+    add("POST", "/api/wms/receipts", lambda s, m, b, q: s.import_receipts(b))
+    add("POST", "/api/wms/inventory", lambda s, m, b, q: s.import_wms_inventory(b))
+    add("GET", "/api/recon", lambda s, m, b, q: s.recon_overview())
+    add("POST", "/api/recon/run", lambda s, m, b, q: s.run_reconciliation("manual"))
+    add("GET", "/api/integrity", lambda s, m, b, q: s.verify_integrity())
     # e216
     add("GET", "/api/permits", lambda s, m, b, q: s.list_permits())
     add("POST", "/api/permits", lambda s, m, b, q: s.save_permit(b))
@@ -93,9 +108,9 @@ def print_page(kind, svc, ident):
                                ("Mode / B/L or AWB", f"{a['transport_mode'] or ''} / {a['transport_doc']}"),
                                ("Vessel / voyage", a["vessel_voyage"]), ("Port of entry", a["port_of_entry"]),
                                ("In-bond ref.", a["inbond_ref"]), ("Admission date", a["entry_date"])])
-                         + grid([("line_no", "#"), ("description", "Description"), ("htsus", "HTSUS"), ("coo", "COO"),
-                                 ("qty", "Qty"), ("uom", "UOM"), ("value", "Value (USD)"), ("zone_status", "Status"),
-                                 ("duty_rate", "PF duty %")], sh["lines"]) + "</section>")
+                         + grid([("line_no", "#"), ("part_no", "Part"), ("description", "Description"), ("htsus", "HTSUS"), ("coo", "COO"),
+                                 ("qty", "Qty"), ("uom", "UOM"), ("qty2", "Customs qty"), ("uom2", "Customs UOM"), ("value", "Value (USD)"),
+                                 ("zone_status", "Status"), ("duty_rate", "PF duty %"), ("pga_ref", "PGA ref.")], sh["lines"]) + "</section>")
     elif kind == "permit":
         p = svc.get_permit(ident)
         parts.append("<section><h1>CBP Form 216 worksheet</h1><h2>Application for FTZ Activity Permit</h2>" + kv([
@@ -116,6 +131,17 @@ def print_page(kind, svc, ident):
             ("Exporting carrier", b["export_carrier"]), ("Foreign destination", b["foreign_dest"])])
             + grid([("line_no", "#"), ("lot_no", "Lot"), ("description", "Description"), ("htsus", "HTSUS"), ("qty", "Qty"),
                     ("uom", "UOM"), ("value", "Value"), ("zone_status", "Status")], b["lines"]) + "</section>")
+    elif kind == "entry":
+        w = svc.entry_worksheet(ident)
+        for l in w["lines"]:
+            l["rate"] = f"{round(100 * (l['duty'] or 0) / l['entered_value'], 3)}%" if l["entered_value"] else ""
+        parts.append("<section><h1>CBP Form 3461 / 7501 data worksheet</h1><h2>Consumption entry from the foreign-trade zone</h2>" + kv([
+            ("Entry number", w["entry_no"]), ("Entry type", "06 (FTZ consumption)"), ("Lines", len(w["lines"])),
+            ("Total entered value (USD)", f"{w['total_value']:,.2f}"), ("Estimated duty (USD)", f"{w['total_duty']:,.2f}")])
+            + grid([("admission_no", "e214"), ("admission_ref", "e214 CBP ref."), ("lot_no", "Lot"), ("part_no", "Part"),
+                    ("description", "Description"), ("htsus", "HTSUS"), ("coo", "COO"), ("qty", "Qty"), ("uom", "UOM"),
+                    ("qty2", "Customs qty"), ("uom2", "Customs UOM"), ("entered_value", "Entered value"), ("zone_status", "Status"),
+                    ("rate", "Eff. duty rate"), ("duty", "Est. duty")], w["lines"]) + "</section>")
     else:
         raise ApiError("unknown form", 404)
     css = ("body{font:13px Manrope,Arial,sans-serif;margin:24px}.brandbar{display:flex;align-items:center;gap:12px;border-bottom:3px solid #d0a339;padding-bottom:8px;margin-bottom:12px}.brandbar img{height:44px;border-radius:6px}.brandbar b{font-size:15px;color:#5a3a16}section{page-break-after:always;max-width:1000px}"
@@ -128,6 +154,9 @@ def print_page(kind, svc, ident):
             "file through ACE or your broker/customs software.</p><script>window.print&&setTimeout(()=>print(),300)</script>")
 
 
+# What an ERP/WMS integration token may call (everything else needs a signed-in person).
+INTEGRATION_ALLOWED = [("POST", r"/api/wms/(receipts|inventory)"), ("POST", r"/api/parts(/import)?"), ("GET", r"/api/parts"),
+                       ("POST", r"/api/admissions"), ("GET", r"/api/admissions/\d+/check"), ("GET", r"/api/lookups")]
 PUBLIC_FILES = {"/style.css", "/auth.css", "/auth.js", "/logo.png", "/compass.png", "/favicon.png"}
 COOKIE = "ftz_session"
 
@@ -261,6 +290,16 @@ class Handler(BaseHTTPRequestHandler):
         """User management. Admins only; the shared demo account never qualifies."""
         if not (user["role"] == "admin" and not user["is_demo"]):
             raise ApiError("administrators only", 403)
+        if path.startswith("/api/tokens"):
+            svc = Service(con, user["username"])
+            if method == "GET" and path == "/api/tokens":
+                return self.json(200, svc.list_tokens())
+            if method == "POST" and path == "/api/tokens":
+                return self.json(200, self.tx(con, lambda: svc.create_token(body.get("name"))))   # the secret is shown only once
+            m = re.match(r"^/api/tokens/(\d+)/revoke$", path)
+            if method == "POST" and m:
+                return self.json(200, self.tx(con, lambda: svc.revoke_token(int(m[1]))))
+            raise ApiError("not found", 404)
         if method == "GET" and path == "/api/users":
             return self.json(200, auth.list_users(con))
         if method == "POST" and path == "/api/users":
@@ -296,7 +335,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.static("/reset.html")
             con = db.connect()
             try:
-                user = auth.session_user(con, self.cookie_token())
+                bearer = self.headers.get("Authorization") or ""
+                if bearer.startswith("Bearer "):
+                    user = integration.find_token(con, bearer[7:].strip())
+                    if not user:
+                        raise ApiError("invalid or revoked API token", 401)
+                    if not any(m == method and re.fullmatch(p, path) for m, p in INTEGRATION_ALLOWED):
+                        raise ApiError("this API token cannot use that endpoint", 403)
+                else:
+                    user = auth.session_user(con, self.cookie_token())
                 if path.startswith("/auth/"):
                     return self.auth_route(con, method, path, body, user)
                 if method == "GET" and path == "/":
@@ -307,14 +354,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(302, "", "text/plain", {"Location": "/"})
                 if method == "GET" and path == "/app.js":
                     return self.static("/app.js")
-                if path.startswith("/api/users"):
+                if path.startswith(("/api/users", "/api/tokens")):
                     return self.admin_route(con, method, path, body, user)
                 svc = Service(con, user["username"])
                 if method == "GET" and path.startswith("/print/"):
-                    m = re.match(r"^/print/(\w+)/(\d+)$", path)
+                    m = re.match(r"^/print/(\w+)/([^/]+)$", path)
                     if not m:
                         raise ApiError("not found", 404)
-                    return self.send(200, print_page(m[1], svc, int(m[2])), "text/html; charset=utf-8")
+                    ident = unquote(m[2])
+                    if m[1] != "entry":
+                        if not ident.isdigit():
+                            raise ApiError("not found", 404)
+                        ident = int(ident)
+                    return self.send(200, print_page(m[1], svc, ident), "text/html; charset=utf-8")
                 if method == "GET" and path.startswith("/export/"):
                     return self.export(con, path.split("/")[2].removesuffix(".csv"))
                 if method == "GET" and path == "/backup":
@@ -330,6 +382,8 @@ class Handler(BaseHTTPRequestHandler):
                 con.close()
         except ApiError as ex:
             self.json(ex.status, {"errors": ex.errors})
+        except sqlite3.IntegrityError as ex:     # a database safeguard refused the change (e.g. negative stock)
+            self.json(409, {"errors": [f"Blocked by a database safeguard: {ex}"]})
         except Exception as ex:  # keep the server alive; details go to the log only
             sys.stderr.write(f"internal error: {ex!r}\n")
             self.json(500, {"errors": ["internal error - see server log"]})
@@ -389,6 +443,9 @@ def main():
     srv = make_server(host, port)
     for n in srv.notes:
         print(n, flush=True)
+    if os.environ.get("FTZ_RECON_AUTO", "1") != "0":     # daily reconciliation look-back
+        stop = threading.Event()
+        threading.Thread(target=recon.scheduler_loop, args=(stop, int(os.environ.get("FTZ_RECON_HOURS", "24"))), daemon=True).start()
     print(f"FTZ system on http://{host}:{port}  (database: {db.db_path()})", flush=True)
     try:
         srv.serve_forever()

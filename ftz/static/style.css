@@ -47,3 +47,7 @@ textarea{min-height:60px}.wide{grid-column:1/-1}.checks{display:flex;gap:14px;fl
 .modal>div{background:var(--panel);border-radius:10px;padding:18px 20px;width:min(1100px,100%)}
 .modal.narrow>div{width:min(560px,100%)}
 @media (max-width:760px){body{flex-direction:column}aside{width:100%;height:auto;position:static}nav{display:flex;overflow-x:auto}nav .sep{display:none}main{padding:14px}}
+.alert.ok{background:var(--okbg);color:var(--ok)}
+.lines{overflow-x:auto}.lines input,.lines select{min-width:64px}
+code{background:var(--infobg);padding:1px 5px;border-radius:4px;font-size:12px}
+h3{font-size:14px;margin:14px 0 6px}

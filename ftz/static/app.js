@@ -111,7 +111,7 @@ function linesEditor(cols, initial) {
   const addRow = (vals = {}) => {
     const tr = h("tr", {}, cols.map((c) => {
       const el = c.type === "select" ? h("select", { "data-k": c.k }, c.options.map(([v, t]) => h("option", { value: v }, t)))
-        : h("input", { "data-k": c.k, type: c.type || "text", step: c.type === "number" ? "any" : null });
+        : h("input", { "data-k": c.k, type: c.type || "text", step: c.type === "number" ? "any" : null, list: c.list });
       el.value = vals[c.k] ?? c.def ?? "";
       return h("td", {}, el);
     }), h("td", {}, h("button", { type: "button", class: "sm", onclick: () => tr.remove() }, "✕")));
@@ -131,7 +131,7 @@ const MODE_OPTS = () => opts(L.modes.map((m) => [m, m]));
 const NAV = [
   ["dashboard", "Dashboard"], ["sep", "Foreign-Trade Zone"], ["admissions", "e214 Admissions"], ["permits", "e216 Permits & Activity"],
   ["inventory", "Zone Inventory"], ["sep", "Bonded movements"], ["inbonds", "In-Bond IT · TE · IE"], ["sep", "System"],
-  ["reports", "Reports"], ["setup", "Setup"], ["audit", "Audit & Export"], ["sep", "Account"], ["account", "My Account"], ["users", "Users"],
+  ["reports", "Reports"], ["integration", "Integrations & Parts"], ["setup", "Setup"], ["audit", "Audit & Export"], ["sep", "Account"], ["account", "My Account"], ["users", "Users"],
 ];
 const VIEWS = {};
 async function go(name, arg) {
@@ -176,17 +176,42 @@ VIEWS.dashboard = async () => {
       d.removals_overdue.map((a) => h("div", { class: "alert bad" }, `Temporary removal ${a.act_no} (${a.lot_no}) was due back ${a.expected_return}.`)),
       d.permits_expiring.map((p) => h("div", { class: "alert" }, `e216 ${p.permit_no} expires ${p.valid_to}.`)),
       d.submitted_admissions.map((a) => h("div", { class: "alert" }, `e214 ${a.doc_no} is submitted — record the CBP approval or rejection.`)),
-      !d.inbond_overdue.length && !d.inbond_unclosed_arrived.length && !d.removals_overdue.length && !d.permits_expiring.length && !d.submitted_admissions.length
+      d.recon && d.recon.issues ? h("div", { class: "alert bad", style: "cursor:pointer", onclick: () => go("reports") }, `Reconciliation on ${d.recon.run_at.replace("T", " ")} found ${d.recon.issues} issue(s) — open Reports to review them.`) : null,
+      !(d.recon && d.recon.issues) && !d.inbond_overdue.length && !d.inbond_unclosed_arrived.length && !d.removals_overdue.length && !d.permits_expiring.length && !d.submitted_admissions.length
         ? h("div", { class: "empty" }, "Nothing outstanding.") : null));
 };
 
 /* ---------- e214 ---------- */
 const LINE_COLS = () => [
-  { k: "description", h: "Description" }, { k: "htsus", h: "HTSUS" }, { k: "coo", h: "COO" },
-  { k: "qty", h: "Qty", type: "number" }, { k: "uom", h: "UOM", def: "PCS" }, { k: "value", h: "Value USD", type: "number" },
+  { k: "part_no", h: "Part no.", list: "parts-list" }, { k: "description", h: "Description" }, { k: "htsus", h: "HTSUS" }, { k: "coo", h: "COO" },
+  { k: "qty", h: "Qty", type: "number" }, { k: "uom", h: "UOM", def: "PCS" },
+  { k: "qty2", h: "Customs qty", type: "number" }, { k: "uom2", h: "Customs UOM" },
+  { k: "value", h: "Value USD", type: "number" },
   { k: "zone_status", h: "Status", type: "select", options: STATUS_OPTS(), def: "PF" },
-  { k: "duty_rate", h: "PF duty %", type: "number" }, { k: "location", h: "Location" },
+  { k: "duty_rate", h: "PF duty %", type: "number" }, { k: "location", h: "Location" }, { k: "pga_ref", h: "PGA ref." },
 ];
+
+/* Choosing a part number fills blank fields from the product master (the server does the same on save). */
+function wirePartMapping(editor) {
+  editor.addEventListener("change", (ev) => {
+    const el = ev.target, tr = el.closest("tr"), k = el.dataset.k;
+    if (!tr || !["part_no", "qty"].includes(k)) return;
+    const pn = tr.querySelector('[data-k="part_no"]').value.trim().toLowerCase();
+    const p = (L.parts || []).find((x) => x.part_no.toLowerCase() === pn);
+    if (!p) return;
+    const inp = (n) => tr.querySelector(`[data-k="${n}"]`);
+    const blank = (n, v) => { const i = inp(n); if (i && !i.value && v != null && v !== "") i.value = v; };
+    const qtyV = parseFloat(inp("qty").value);
+    if (k === "part_no") {
+      blank("description", p.description); blank("htsus", p.htsus); blank("coo", p.coo); blank("uom2", p.uom2);
+      if (p.uom) inp("uom").value = p.uom;
+      if (p.default_status) inp("zone_status").value = p.default_status;
+      if (p.default_status === "PF") blank("duty_rate", p.duty_rate);
+      toast(`Filled from product master${p.pga_agencies ? " — PGA review flagged: " + p.pga_agencies : ""}`);
+    }
+    if (p.conv && qtyV && !inp("qty2").value) inp("qty2").value = Math.round(qtyV * p.conv * 1e4) / 1e4;
+  });
+}
 
 VIEWS.admissions = async () => {
   const list = await get("/api/admissions");
@@ -218,9 +243,11 @@ function admissionForm(existing) {
   ];
   const vals = existing ? { ...existing, census_stat: !!existing.census_stat } : { entry_date: today() };
   const editor = linesEditor(LINE_COLS(), existing && existing.lines);
+  wirePartMapping(editor);
   const errBox = h("div");
   const form = h("form", {}, h("div", { class: "fields" }, f.map((x) => field(x, vals[x.name]))),
-    h("h2", {}, "Merchandise lines"), editor, errBox,
+    h("h2", {}, "Merchandise lines"), h("p", { class: "sub" }, "Enter a part number to fill description, HTSUS, origin, units and duty rate from the product master. Customs quantity is the second unit CBP tracks (e.g. KG)."),
+    h("datalist", { id: "parts-list" }, (L.parts || []).map((p) => h("option", { value: p.part_no }, p.description || ""))), editor, errBox,
     h("div", { class: "bar" }, h("button", { class: "primary", type: "submit" }, "Save draft")));
   const close = modal(existing ? `Edit ${existing.doc_no}` : "New e214 application", form);
   form.addEventListener("submit", async (ev) => {
@@ -240,7 +267,8 @@ async function admissionDetail(id) {
   const body = h("div", {},
     h("div", { class: "bar" }, tag(a.status),
       canEdit && btn("Edit", () => { close(); admissionForm(a); }),
-      a.status === "draft" && btn("Submit to CBP", () => doAct("submit", {}, "Submitted"), "primary"),
+      a.status === "draft" && btn("Run checks", () => showChecks(a.id)),
+      a.status === "draft" && btn("Submit to CBP", () => submitFlow(a.id, () => doAct("submit", {}, "Submitted")), "primary"),
       a.status === "submitted" && btn("Record CBP approval", () => formModal("Record approval", [{ name: "cbp_ref", label: "CBP / ACE reference", required: true }], {}, "Approve & admit to inventory", (v) => doAct("approve", v, "Approved — lots created")), "primary"),
       a.status === "submitted" && btn("Record rejection", () => formModal("Record rejection", [{ name: "reason", label: "Reason", type: "textarea", wide: true, required: true }], {}, "Reject", (v) => doAct("reject", v, "Rejected"))),
       canEdit && btn("Delete", () => confirm("Delete this e214?") && doAct("delete", {}, "Deleted"), "danger"),
@@ -250,10 +278,26 @@ async function admissionDetail(id) {
       ["In-bond ref.", a.inbond_ref], ["CBP ref.", a.cbp_ref], ["Total value", money(a.totals.value)]]),
     a.remarks && h("p", {}, a.remarks),
     a.sheets.map((s) => h("div", { class: "card" }, h("b", {}, `Form ${s.form} — sheet ${s.sheet} of ${s.of}`),
-      table([{ h: "#", k: "line_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" }, { h: "COO", k: "coo" },
-        { h: "Qty", f: (r) => qty(r.qty), num: true }, { h: "UOM", k: "uom" }, { h: "Value", f: (r) => money(r.value), num: true },
-        { h: "Status", f: (r) => tag(r.zone_status, r.zone_status === "ZR" ? "warn" : "") }, { h: "Duty %", k: "duty_rate" }], s.lines))));
+      table([{ h: "#", k: "line_no" }, { h: "Part", k: "part_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" }, { h: "COO", k: "coo" },
+        { h: "Qty", f: (r) => qty(r.qty), num: true }, { h: "UOM", k: "uom" }, { h: "Customs qty", f: (r) => r.qty2 == null ? "" : `${qty(r.qty2)} ${r.uom2 || ""}`, num: true },
+        { h: "Value", f: (r) => money(r.value), num: true },
+        { h: "Status", f: (r) => tag(r.zone_status, r.zone_status === "ZR" ? "warn" : "") }, { h: "Duty %", k: "duty_rate" }, { h: "PGA ref.", k: "pga_ref" }], s.lines))));
   const close = modal(`e214 ${a.doc_no}`, body);
+}
+
+function checkPanel(c) {
+  return h("div", {},
+    c.errors.length ? h("div", { class: "errs" }, h("b", {}, "Blocking — fix before submitting"), h("ul", {}, c.errors.map((m) => h("li", {}, m)))) : null,
+    c.warnings.length ? h("div", { class: "alert" }, h("b", {}, "Review before submitting"), h("ul", {}, c.warnings.map((m) => h("li", {}, m)))) : null,
+    !c.errors.length && !c.warnings.length ? h("div", { class: "alert ok" }, "All checks passed: lines are complete, match the product master, and agree with WMS receiving.") : null,
+    c.wms_findings && !c.wms_blocking ? h("p", { class: "sub" }, "WMS mismatches only warn. Change this in Setup → Settings to block submission instead.") : null);
+}
+async function showChecks(id) { modal("Pre-submission checks", checkPanel(await get(`/api/admissions/${id}/check`)), { narrow: true }); }
+async function submitFlow(id, go_) {
+  const c = await get(`/api/admissions/${id}/check`);
+  if (!c.errors.length && !c.warnings.length) return go_();
+  const close = modal("Pre-submission checks", h("div", {}, checkPanel(c), h("div", { class: "bar" },
+    !c.errors.length && h("button", { class: "primary", onclick: () => { close(); go_(); } }, "Submit anyway"), h("button", { onclick: () => close() }, "Go back and fix"))), { narrow: true });
 }
 
 /* ---------- e216 ---------- */
@@ -329,18 +373,39 @@ VIEWS.inventory = async () => {
   const st = VIEWS.inventory.status || "";
   const lots = await get("/api/lots" + (st ? "?status=" + st : ""));
   return h("div", {},
-    head("Zone Inventory", "Every lot traces to its e214 line. Quantities change only through e216 activity, withdrawals, in-bond issue or audited adjustments."),
+    head("Zone Inventory", "Every lot traces to its e214 line. Stock is used first-in-first-out; quantities change only through e216 activity, withdrawals, in-bond issue or audited adjustments.",
+      h("button", { class: "primary", onclick: fifoForm }, "FIFO withdraw")),
     h("div", { class: "bar" }, h("label", {}, "Status filter ", h("select", { onchange: (e) => { VIEWS.inventory.status = e.target.value; refresh(); } },
       [["", "All"], ...STATUS_OPTS()].map(([v, t]) => h("option", { value: v, selected: v === st }, t)))),
       h("span", { class: "grow" }), h("a", { class: "btn", href: "/export/lots.csv" }, "Export CSV")),
     h("div", { class: "card" }, table([
-      { h: "Lot", k: "lot_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" }, { h: "COO", k: "coo" },
-      { h: "Status", f: (r) => tag(r.zone_status, r.zone_status === "ZR" ? "warn" : "") },
-      { h: "On hand", f: (r) => `${qty(r.qty_on_hand)} ${r.uom}`, num: true }, { h: "Out", f: (r) => qty(r.qty_out), num: true },
+      { h: "Lot", k: "lot_no" }, { h: "Part", k: "part_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" }, { h: "COO", k: "coo" },
+      { h: "Status", f: (r) => tag(r.zone_status, r.zone_status === "ZR" ? "warn" : "") }, { h: "Received", k: "received_on" },
+      { h: "On hand", f: (r) => `${qty(r.qty_on_hand)} ${r.uom}` + (r.qty2_on_hand != null ? ` · ${qty(r.qty2_on_hand)} ${r.uom2}` : ""), num: true },
+      { h: "Out", f: (r) => qty(r.qty_out), num: true },
       { h: "Value", f: (r) => money(r.value_on_hand), num: true }, { h: "Location", k: "location" },
       { h: "", f: (r) => h("span", {}, h("button", { class: "sm", onclick: () => withdrawForm(r) }, "Withdraw "), " ", h("button", { class: "sm", onclick: () => movements(r) }, "History")) },
     ], lots, null, "No inventory. Approve an e214 to admit merchandise.")));
 };
+async function fifoForm() {
+  const stock = await get("/api/stock");
+  if (!stock.length) return toast("No stock on hand");
+  const f = [
+    { name: "item", label: "Item (oldest lot is used first)", type: "select", wide: true, required: true,
+      options: stock.map((g, i) => [i, `${g.zone_no} · ${g.part_no || g.description} · ${g.zone_status} · ${qty(g.on_hand)} ${g.uom}${g.on_hand2 != null ? ` (${qty(g.on_hand2)} ${g.uom2})` : ""} in ${g.lots} lot(s), oldest ${g.oldest_received}`]) },
+    { name: "kind", label: "Withdraw to", type: "select", options: [["consumption", "U.S. consumption (7501 entry)"], ["export", "Export"], ["transfer", "Duty-free transfer to another zone"]] },
+    { name: "dest_zone_id", label: "Transfer: destination zone", type: "select", options: opts(L.zones.map((z) => [z.id, z.zone_no])) },
+    { name: "qty", label: "Total quantity", type: "number", required: true }, { name: "date", label: "Date", type: "date", required: true },
+    { name: "entry_no", label: "Consumption entry no." }, { name: "duty_rate", label: "Duty rate % in force (NPF only)" },
+    { name: "export_ref", label: "Export / transfer ref." },
+  ];
+  formModal("FIFO withdraw", f, { date: today() }, "Withdraw oldest first", async (v) => {
+    const g = stock[+v.item];
+    const r = await post("/api/withdrawals/fifo", { ...v, key: g.key, zone_id: g.zone_id, zone_status: g.zone_status });
+    alert("Drawn from:\n" + r.allocations.map((a) => `  ${a.lot_no}: ${qty(a.qty)}${a.estimated_duty != null ? "  (est. duty " + money(a.estimated_duty) + ")" : ""}`).join("\n"));
+    refresh();
+  });
+}
 function withdrawForm(lot) {
   const f = [
     { name: "kind", label: "Withdraw to", type: "select", options: [["consumption", "U.S. consumption (7501 entry)"], ["export", "Export"], ["transfer", "Duty-free transfer to another zone"]] },
@@ -350,7 +415,7 @@ function withdrawForm(lot) {
     { name: "export_ref", label: "Export / transfer ref. (AES ITN, e214 no.)" },
   ];
   formModal(`Withdraw ${lot.lot_no} (${lot.zone_status})`, f, { date: today() }, "Withdraw", async (v) => {
-    const r = await post("/api/withdrawals", v); toast(r.estimated_duty != null ? `Withdrawn — est. duty ${money(r.estimated_duty)}` : "Withdrawn"); refresh();
+    const r = await post("/api/withdrawals", { ...v, lot_id: lot.id }); toast(r.estimated_duty != null ? `Withdrawn — est. duty ${money(r.estimated_duty)}` : "Withdrawn"); refresh();
   });
   if (lot.zone_status === "ZR") toast("ZR lots may only be exported, destroyed or moved TE/IE");
 }
@@ -358,7 +423,7 @@ async function movements(lot) {
   const m = await get(`/api/lots/${lot.id}/movements`);
   modal(`History — ${lot.lot_no}`, h("div", {},
     h("div", { class: "bar" }, h("button", { onclick: () => formModal("Adjust on-hand", [{ name: "delta", label: "Quantity change (+/−)", type: "number", required: true }, { name: "reason", label: "Reason", type: "textarea", wide: true, required: true }], {}, "Post adjustment", async (v) => { await post("/api/adjustments", { ...v, lot_id: lot.id }); toast("Adjusted"); refresh(); }) }, "Adjust quantity")),
-    table([{ h: "When", k: "ts" }, { h: "Type", k: "kind" }, { h: "Qty", f: (r) => qty(r.qty), num: true }, { h: "Value", f: (r) => money(r.value), num: true },
+    table([{ h: "When", k: "ts" }, { h: "Type", k: "kind" }, { h: "Qty", f: (r) => qty(r.qty), num: true }, { h: "Customs qty", f: (r) => r.qty2 == null ? "" : qty(r.qty2), num: true }, { h: "Value", f: (r) => money(r.value), num: true },
       { h: "Ref", f: (r) => `${r.ref_type || ""} ${r.ref_no || ""}` }, { h: "Note", k: "note" }, { h: "User", k: "user" }], m)));
 }
 
@@ -450,7 +515,9 @@ VIEWS.setup = async () => {
     h("h2", {}, "Zones"), h("div", { class: "card" }, table([{ h: "Zone", k: "zone_no" }, { h: "Name", k: "name" }, { h: "Grantee", k: "grantee" }, { h: "Port", k: "port_code" }], L.zones, null, "Add a zone first.")),
     h("h2", {}, "Parties"), h("div", { class: "card" }, table([{ h: "Type", k: "kind" }, { h: "Name", k: "name" }, { h: "ID", k: "ident" }], L.parties, null, "No parties.")),
     h("h2", {}, "Settings"), h("div", { class: "card" }, (() => {
-      const f = [{ name: "lines_per_sheet", label: "Lines per 214 / 214A sheet" }, { name: "transit_days_IT", label: "IT transit days" },
+      const f = [{ name: "inventory_method", label: "Inventory method", type: "select", options: [["fifo", "FIFO (oldest stock first)"], ["specific", "Specific identification (only if CBP approved)"]] },
+        { name: "require_wms_match", label: "WMS receiving mismatch", type: "select", options: [["0", "Warn only"], ["1", "Block e214 submission"]] },
+        { name: "lines_per_sheet", label: "Lines per 214 / 214A sheet" }, { name: "transit_days_IT", label: "IT transit days" },
         { name: "transit_days_TE", label: "TE transit days" }, { name: "transit_days_IE", label: "IE transit days" }, { name: "expiry_warning_days", label: "Permit expiry warning (days)" }];
       const errBox = h("div");
       const form = h("form", {}, h("p", { class: "sub" }, "Transit-day defaults are placeholders — set them to the time limit CBP grants at your port for each mode."),
@@ -460,16 +527,109 @@ VIEWS.setup = async () => {
     })()));
 };
 
+function reconPanel(o) {
+  const r = o.latest;
+  if (!r) return h("div", { class: "empty" }, "No reconciliation has run yet. It runs automatically every day, or press the button.");
+  const list = (title, items) => items.length ? h("div", {}, h("h3", {}, title), h("ul", {}, items.map((m) => h("li", {}, m)))) : null;
+  return h("div", {},
+    h("div", { class: "alert " + (r.issues ? "bad" : "ok") }, `${r.kind === "daily" ? "Daily" : "Manual"} run ${r.run_at.replace("T", " ")}: ${r.lots_checked} lots checked, ${r.issues ? r.issues + " issue(s) found" : "no issues"}.`),
+    list("Ledger breaks (a balance that the movement history does not explain)", r.ledger_breaks),
+    r.wms_variances.length ? h("div", {}, h("h3", {}, `Physical (WMS count of ${r.wms_snapshot_on}) versus customs ledger`),
+      table([{ h: "Part", k: "part_no" }, { h: "WMS", k: "wms", num: true }, { h: "Customs ledger", k: "ledger", num: true }, { h: "Difference", k: "diff", num: true }, { h: "", k: "kind" }], r.wms_variances)) : null,
+    r.unmatched_receipts.length ? h("div", {}, h("h3", {}, "WMS receipts with no e214"), table([{ h: "B/L / ref", k: "ref" }, { h: "Lines", k: "n", num: true }, { h: "Parts", k: "parts" }], r.unmatched_receipts)) : null,
+    list("e214 versus WMS receiving", r.admission_mismatches),
+    list("Overdue in-bonds", r.overdue_inbonds), list("Overdue temporary removals", r.overdue_removals),
+    !r.wms_snapshot_on ? h("p", { class: "sub" }, "No WMS inventory count has been imported, so physical stock was not compared. Import one under Integrations & Parts.") : null);
+}
 VIEWS.reports = async () => {
-  const r = await get("/api/reports");
+  const [r, rc] = await Promise.all([get("/api/reports"), get("/api/recon")]);
   const sec = (t, cols, d) => [h("h2", {}, t), h("div", { class: "card" }, table(cols, d, null, "No data yet."))];
-  return h("div", {}, head("Reports", "Weekly entry basis, inventory reconciliation and activity summaries for CBP / FTZ Board / internal use."),
+  return h("div", {}, head("Reports", "Reconciliation, weekly entry basis and activity summaries for CBP / FTZ Board / internal use.",
+      h("button", { class: "primary", onclick: async () => { if (await act(() => post("/api/recon/run"), "Reconciliation finished")) refresh(); } }, "Run reconciliation now")),
+    h("h2", {}, "Reconciliation (daily look-back)"), h("div", { class: "card" }, reconPanel(rc)),
     sec("Weekly entry filing — consumption withdrawals", [{ h: "Week", k: "week" }, { h: "Status", k: "zone_status" }, { h: "Withdrawals", k: "withdrawals", num: true },
-      { h: "Value", f: (x) => money(x.value), num: true }, { h: "Est. duty", f: (x) => money(x.est_duty), num: true }, { h: "Entries", k: "entries" }], r.weekly_entries),
-    sec("Inventory reconciliation by zone and status", [{ h: "Zone", k: "zone_no" }, { h: "Status", k: "zone_status" }, { h: "Admitted", k: "admitted", num: true },
+      { h: "Value", f: (x) => money(x.value), num: true }, { h: "Est. duty", f: (x) => money(x.est_duty), num: true },
+      { h: "Entries (3461 / 7501 worksheet)", f: (x) => h("span", {}, String(x.entries || "").split(",").filter(Boolean).flatMap((e, i) => [i ? " · " : "", h("a", { href: `/print/entry/${encodeURIComponent(e)}`, target: "_blank" }, e)])) }], r.weekly_entries),
+    sec("Inventory by zone and status", [{ h: "Zone", k: "zone_no" }, { h: "Status", k: "zone_status" }, { h: "Admitted", k: "admitted", num: true },
       { h: "On hand", k: "on_hand", num: true }, { h: "Temp. out", k: "out_temp", num: true }, { h: "Value", f: (x) => money(x.value), num: true }], r.inventory_reconciliation),
     sec("Activity summary (e216)", [{ h: "Activity", f: (x) => L.activities[x.kind] }, { h: "Count", k: "n", num: true }, { h: "Qty", k: "qty", num: true }], r.activity_summary),
-    sec("In-bond summary", [{ h: "Type", k: "type" }, { h: "Status", k: "status" }, { h: "Count", k: "n", num: true }], r.inbond_summary));
+    sec("In-bond summary", [{ h: "Type", k: "type" }, { h: "Status", k: "status" }, { h: "Count", k: "n", num: true }], r.inbond_summary),
+    sec("Recent reconciliation runs", [{ h: "When", k: "run_at" }, { h: "Kind", k: "kind" }, { h: "By", k: "run_by" }, { h: "Issues", k: "issues", num: true }], rc.runs));
+};
+
+/* ---------- integrations: product master, WMS feeds, API tokens ---------- */
+function parseCSV(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  const push = () => { row.push(cur); cur = ""; if (row.some((x) => x.trim() !== "")) rows.push(row); row = []; };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; push(); }
+    else cur += c;
+  }
+  push();
+  if (rows.length < 2) throw { errors: ["Paste or choose a CSV with a header row and at least one data row"] };
+  const head_ = rows.shift().map((x) => x.trim().toLowerCase().replace(/\s+/g, "_"));
+  return rows.map((r) => Object.fromEntries(head_.map((k, i) => [k, (r[i] ?? "").trim()])));
+}
+function csvImport(title, columns, endpoint, extra = []) {
+  const ta = h("textarea", { rows: 8, placeholder: columns, style: "width:100%;font-family:monospace;font-size:12px" });
+  const box = h("div", { class: "fields" }, extra.map((f) => field(f, f.value)));
+  const out = h("div");
+  const file = h("input", { type: "file", accept: ".csv,text/csv,text/plain", onchange: async (e) => { const f = e.target.files[0]; if (f) ta.value = await f.text(); } });
+  const run = async () => {
+    try {
+      const r = await post(endpoint, { rows: parseCSV(ta.value), ...readFields(box, extra) });
+      out.replaceChildren(h("div", { class: r.errors.length ? "alert" : "alert ok" }, `${r.imported} row(s) imported${r.errors.length ? `, ${r.errors.length} rejected:` : "."}`),
+        r.errors.length ? table([{ h: "Row", k: "row", num: true }, { h: "Key", k: "key" }, { h: "Problem", k: "error" }], r.errors) : null);
+      refresh();
+    } catch (e) { showErrors(out, e); }
+  };
+  modal(title, h("div", {}, h("p", { class: "sub" }, "CSV columns: ", h("code", {}, columns), ". Rows with problems are rejected; the rest are imported."), box, h("label", {}, "Choose a CSV file", file), h("label", {}, "…or paste it here", ta), out,
+    h("div", { class: "bar" }, h("button", { class: "primary", type: "button", onclick: run }, "Import"))));
+}
+function partForm(p) {
+  const f = [{ name: "part_no", label: "Part number", required: true }, { name: "description", label: "Description" }, { name: "htsus", label: "HTSUS (10 digits)" },
+    { name: "coo", label: "Country of origin (2 letters)" }, { name: "uom", label: "Commercial unit (PCS, BOX…)" }, { name: "uom2", label: "Customs unit (KG, DOZ…)" },
+    { name: "conv", label: "Customs units per commercial unit", type: "number" }, { name: "duty_rate", label: "Duty rate % (for PF)", type: "number" },
+    { name: "default_status", label: "Default zone status", type: "select", options: opts(STATUS_OPTS()) },
+    { name: "pga_agencies", label: "PGA agencies to review (FDA, USDA, EPA, CPSC, FCC…)" }, { name: "active", label: "Active", type: "checkbox" }];
+  formModal(p ? `Edit ${p.part_no}` : "New part", f, p ? { ...p, active: !!p.active } : { active: true }, "Save part", async (v) => { await post("/api/parts", v); toast("Part saved"); refresh(); });
+}
+VIEWS.integration = async () => {
+  const [parts, wms] = await Promise.all([get("/api/parts"), get("/api/wms")]);
+  const tokens = isAdmin() ? await get("/api/tokens") : null;
+  const snap = wms.inventory[0] && wms.inventory[0].snapshot_on;
+  const newToken = () => formModal("New API token", [{ name: "name", label: "Name (e.g. WMS feed, ERP sync)", required: true }], {}, "Create token", async (v) => {
+    const t = await post("/api/tokens", v); refresh();
+    const close = modal("Copy this token now", h("div", {}, h("p", { class: "alert" }, "It is shown only once. Store it in your ERP/WMS integration settings; it cannot be recovered, only replaced."),
+      h("input", { readonly: true, value: t.token, onclick: (e) => e.target.select() }),
+      h("div", { class: "bar" }, h("button", { class: "primary", onclick: async () => { try { await navigator.clipboard.writeText(t.token); toast("Copied"); } catch { toast("Select the text and copy it"); } } }, "Copy"), h("button", { onclick: () => close() }, "Done"))), { narrow: true });
+  });
+  return h("div", {}, head("Integrations & Parts", "Product master for smart mapping, WMS feeds for validation and reconciliation, and API tokens for ERP/WMS systems."),
+    h("h2", {}, `Product master (${parts.length})`),
+    h("div", { class: "bar" }, h("button", { class: "primary", onclick: () => partForm() }, "+ Part"),
+      h("button", { onclick: () => csvImport("Import product master", "part_no,description,htsus,coo,uom,uom2,conv,duty_rate,default_status,pga_agencies", "/api/parts/import") }, "Import CSV")),
+    h("div", { class: "card" }, table([{ h: "Part", k: "part_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" }, { h: "COO", k: "coo" }, { h: "Unit", k: "uom" },
+      { h: "Customs unit", f: (x) => x.uom2 ? `${x.uom2}${x.conv ? " ×" + x.conv : ""}` : "" }, { h: "Duty %", k: "duty_rate", num: true }, { h: "Status", k: "default_status" },
+      { h: "PGA", k: "pga_agencies" }, { h: "Active", f: (x) => x.active ? "yes" : tag("no", "bad") }], parts, partForm, "No parts yet. Add them here, import a CSV, or push them from your ERP with an API token.")),
+    h("h2", {}, "WMS receiving log"),
+    h("div", { class: "bar" }, h("button", { onclick: () => csvImport("Import WMS receipts", "receipt_no,part_no,qty,uom,received_on,ref", "/api/wms/receipts") }, "Import CSV"),
+      h("span", { class: "sub" }, "ref = the bill of lading / AWB the goods arrived on. It is what each e214 is checked against before submission.")),
+    h("div", { class: "card" }, table([{ h: "Receipt", k: "receipt_no" }, { h: "Part", k: "part_no" }, { h: "Qty", k: "qty", num: true }, { h: "Unit", k: "uom" }, { h: "Received", k: "received_on" }, { h: "B/L / ref", k: "ref" }], wms.receipts, null, "No receipts imported.")),
+    h("h2", {}, `WMS physical inventory${snap ? " — count of " + snap : ""}`),
+    h("div", { class: "bar" }, h("button", { onclick: () => csvImport("Import WMS inventory count", "part_no,qty,uom", "/api/wms/inventory", [{ name: "snapshot_on", label: "Count date", type: "date", value: today() }]) }, "Import CSV"),
+      h("span", { class: "sub" }, "The latest count is compared with the customs ledger in the daily reconciliation.")),
+    h("div", { class: "card" }, table([{ h: "Part", k: "part_no" }, { h: "Qty", k: "qty", num: true }, { h: "Unit", k: "uom" }], wms.inventory, null, "No inventory count imported.")),
+    tokens ? [h("h2", {}, "ERP / WMS API access"),
+      h("p", { class: "sub" }, "Tokens let your systems push parts, receipts and counts, and create e214 drafts. They cannot approve anything, withdraw stock or see other data. Send them as ", h("code", {}, "Authorization: Bearer <token>"), " to ",
+        h("code", {}, "POST /api/wms/receipts"), ", ", h("code", {}, "/api/wms/inventory"), ", ", h("code", {}, "/api/parts/import"), " (JSON ", h("code", {}, '{"rows":[…]}'), ") and ", h("code", {}, "/api/admissions"), "."),
+      h("div", { class: "bar" }, h("button", { class: "primary", onclick: newToken }, "+ New token")),
+      h("div", { class: "card" }, table([{ h: "Name", k: "name" }, { h: "Created", k: "created_at" }, { h: "By", k: "created_by" }, { h: "Last used", k: "last_used" },
+        { h: "Status", f: (t) => tag(t.active ? "active" : "revoked", t.active ? "ok" : "bad") },
+        { h: "", f: (t) => t.active ? h("button", { class: "sm danger", onclick: async () => { if (confirm("Revoke this token? Systems using it stop working immediately.") && await act(() => post(`/api/tokens/${t.id}/revoke`))) refresh(); } }, "Revoke") : "" }], tokens, null, "No tokens yet."))] : null);
 };
 
 VIEWS.account = async () => {
@@ -506,7 +666,14 @@ VIEWS.audit = async () => {
   const ex = ["admissions", "admission_lines", "lots", "movements", "permits", "activities", "inbonds", "inbond_lines", "audit"];
   return h("div", {},
     head("Audit & Export", "Every change is recorded with the operator name. Export tables for CBP audit requests or take a full database backup."),
-    h("div", { class: "bar" }, ex.map((t) => h("a", { class: "btn", href: `/export/${t}.csv` }, t + ".csv")), isAdmin() && h("a", { class: "btn primary", href: "/backup" }, "Full backup (.db)")),
+    h("div", { class: "bar" }, h("button", { class: "primary", onclick: async () => {
+      const r = await get("/api/integrity");
+      modal("History integrity check", h("div", {}, h("div", { class: "alert " + (r.ok ? "ok" : "bad") }, r.ok ? "Verified: nothing in the audit log or stock ledger has been altered or removed since it was written." : "PROBLEM FOUND: the recorded history no longer matches its fingerprints."),
+        ...Object.entries(r.tables).map(([t, x]) => h("div", {}, h("h3", {}, t === "audit" ? "Audit log" : "Stock ledger"), h("p", {}, `${x.rows_verified} rows verified` + (x.rows_before_chaining ? `; ${x.rows_before_chaining} older rows pre-date the fingerprints` : "")), x.head ? h("p", { class: "sub" }, "Latest fingerprint: ", h("code", {}, x.head.slice(0, 24) + "…")) : null, x.breaks.length ? h("ul", {}, x.breaks.map((m) => h("li", {}, m))) : null)),
+        h("p", { class: "sub" }, "Note these fingerprints somewhere outside this system (e.g. with each weekly backup). If someone with direct access to the database file ever rewrote history, later checks would no longer match what you noted.")), { narrow: true });
+    } }, "Verify history integrity"),
+      ex.map((t) => h("a", { class: "btn", href: `/export/${t}.csv` }, t + ".csv")), isAdmin() && h("a", { class: "btn", href: "/backup" }, "Full backup (.db)")),
+    h("p", { class: "sub" }, "The audit log and stock ledger are append-only, and each row carries a fingerprint that depends on every row before it, so an edit or deletion anywhere is detectable."),
     h("div", { class: "card" }, table([{ h: "When", k: "ts" }, { h: "User", k: "user" }, { h: "Action", k: "action" }, { h: "Entity", f: (r) => `${r.entity} #${r.entity_id}` }, { h: "Detail", k: "detail" }], log)));
 };
 

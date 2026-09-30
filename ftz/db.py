@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sqlite3
@@ -63,6 +64,21 @@ CREATE TABLE IF NOT EXISTS reset_tokens(
   id INTEGER PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id),
   created_at TEXT, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS counters(name TEXT PRIMARY KEY, n INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS parts(
+  id INTEGER PRIMARY KEY, part_no TEXT UNIQUE COLLATE NOCASE NOT NULL, description TEXT, htsus TEXT, coo TEXT,
+  uom TEXT, uom2 TEXT, conv REAL, duty_rate REAL, default_status TEXT, pga_agencies TEXT,
+  active INTEGER NOT NULL DEFAULT 1, source TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS wms_receipts(
+  id INTEGER PRIMARY KEY, receipt_no TEXT NOT NULL, part_no TEXT NOT NULL COLLATE NOCASE, qty REAL NOT NULL, uom TEXT,
+  received_on TEXT, ref TEXT COLLATE NOCASE, source TEXT, imported_at TEXT, UNIQUE(receipt_no, part_no));
+CREATE TABLE IF NOT EXISTS wms_inventory(
+  id INTEGER PRIMARY KEY, snapshot_on TEXT NOT NULL, part_no TEXT NOT NULL COLLATE NOCASE, qty REAL NOT NULL, uom TEXT,
+  source TEXT, imported_at TEXT, UNIQUE(snapshot_on, part_no));
+CREATE TABLE IF NOT EXISTS api_tokens(
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL, created_by TEXT, created_at TEXT,
+  last_used TEXT, active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS recon_runs(
+  id INTEGER PRIMARY KEY, run_at TEXT, kind TEXT, run_by TEXT, issues INTEGER, summary TEXT);
 """
 
 
@@ -77,8 +93,52 @@ def connect(path=None):
     return con
 
 
+# Columns added after the first release: applied to old databases and new ones alike.
+NEW_COLUMNS = [
+    ("admission_lines", "part_no", "TEXT"), ("admission_lines", "qty2", "REAL"), ("admission_lines", "uom2", "TEXT"),
+    ("admission_lines", "pga_ref", "TEXT"),
+    ("lots", "part_no", "TEXT"), ("lots", "received_on", "TEXT"), ("lots", "uom2", "TEXT"),
+    ("lots", "qty2_admitted", "REAL"), ("lots", "qty2_on_hand", "REAL"), ("lots", "qty2_out", "REAL"),
+    ("movements", "qty2", "REAL"), ("movements", "prev_hash", "TEXT"), ("movements", "hash", "TEXT"),
+    ("audit", "prev_hash", "TEXT"), ("audit", "hash", "TEXT"),
+    ("activities", "qty2", "REAL"),
+    ("inbond_lines", "qty2", "REAL"), ("inbond_lines", "part_no", "TEXT"),
+]
+
+# Database-level safeguards: they hold even if application code has a bug.
+TRIGGERS = """
+DROP TRIGGER IF EXISTS lots_no_negative;
+CREATE TRIGGER lots_no_negative BEFORE UPDATE ON lots
+WHEN NEW.qty_on_hand < -0.00005 OR NEW.qty_out < -0.00005 OR COALESCE(NEW.qty2_on_hand,0) < -0.00005 OR COALESCE(NEW.qty2_out,0) < -0.00005
+BEGIN SELECT RAISE(ABORT, 'negative inventory blocked: this would remove stock that is not in the zone'); END;
+DROP TRIGGER IF EXISTS lots_no_negative_ins;
+CREATE TRIGGER lots_no_negative_ins BEFORE INSERT ON lots
+WHEN NEW.qty_on_hand < 0 OR NEW.qty_out < 0
+BEGIN SELECT RAISE(ABORT, 'negative inventory blocked'); END;
+DROP TRIGGER IF EXISTS audit_no_update;
+CREATE TRIGGER audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;
+DROP TRIGGER IF EXISTS audit_no_delete;
+CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;
+DROP TRIGGER IF EXISTS movements_no_update;
+CREATE TRIGGER movements_no_update BEFORE UPDATE ON movements BEGIN SELECT RAISE(ABORT, 'the inventory ledger is append-only'); END;
+DROP TRIGGER IF EXISTS movements_no_delete;
+CREATE TRIGGER movements_no_delete BEFORE DELETE ON movements BEGIN SELECT RAISE(ABORT, 'the inventory ledger is append-only'); END;
+"""
+
+
+def _migrate(con):
+    for table, col, decl in NEW_COLUMNS:
+        if col not in [r[1] for r in con.execute(f"PRAGMA table_info({table})")]:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+    # Lots created before receipt dates existed: use the admission date (or creation day).
+    con.execute("""UPDATE lots SET received_on=COALESCE((SELECT entry_date FROM admissions a WHERE a.id=lots.admission_id),
+                   substr(created_at,1,10)) WHERE received_on IS NULL""")
+    con.executescript(TRIGGERS)
+
+
 def init(con):
     con.executescript(SCHEMA)
+    _migrate(con)
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
     con.commit()
@@ -106,8 +166,32 @@ def next_no(con, prefix, year):
     return f"{prefix}-{year}-{n:04d}"
 
 
+def _norm(v):
+    if isinstance(v, bool) or v is None:
+        return "" if v is None else str(v)
+    if isinstance(v, (int, float)):
+        return repr(float(v))
+    return str(v)
+
+
+def chain_hash(prev, *parts):
+    """SHA-256 over the previous row's hash and this row's fields: editing any earlier row breaks every later hash."""
+    return hashlib.sha256((prev + "\x1f" + "\x1f".join(_norm(p) for p in parts)).encode()).hexdigest()
+
+
+def last_hash(con, table):
+    r = con.execute(f"SELECT hash FROM {table} WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
+    return r[0] if r else ""
+
+
+AUDIT_FIELDS = ("ts", "user", "action", "entity", "entity_id", "detail")
+MOVE_FIELDS = ("ts", "lot_id", "kind", "qty", "qty2", "value", "ref_type", "ref_no", "note", "user", "duty")
+
+
 def audit(con, user, action, entity, entity_id, detail=None):
-    con.execute(
-        "INSERT INTO audit(ts,user,action,entity,entity_id,detail) VALUES(?,?,?,?,?,?)",
-        (now(), user or "unknown", action, entity, str(entity_id),
-         json.dumps(detail) if detail is not None else None))
+    ts, user = now(), user or "unknown"
+    detail = json.dumps(detail, default=str) if detail is not None else None
+    prev = last_hash(con, "audit")
+    h = chain_hash(prev, ts, user, action, entity, str(entity_id), detail)
+    con.execute("INSERT INTO audit(ts,user,action,entity,entity_id,detail,prev_hash,hash) VALUES(?,?,?,?,?,?,?,?)",
+                (ts, user, action, entity, str(entity_id), detail, prev, h))

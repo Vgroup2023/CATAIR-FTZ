@@ -37,18 +37,18 @@ class Base(unittest.TestCase):
             return self.s.create_party({"kind": kind, "name": name})["id"]
         self.op, self.car, self.imp = mk("operator", "Op Co"), mk("carrier", "Carrier Co"), mk("importer", "Imp Co")
 
-    def admission(self, lines=None, approve=True):
+    def admission(self, lines=None, approve=True, entry_date=None, bl="BL1"):
         a = self.s.save_admission({
             "zone_id": self.zone, "operator_id": self.op, "carrier_id": self.car, "importer_id": self.imp,
-            "transport_mode": "truck", "transport_doc": "BL1", "port_of_entry": "1001", "entry_date": TODAY,
+            "transport_mode": "truck", "transport_doc": bl, "port_of_entry": "1001", "entry_date": entry_date or TODAY,
             "lines": lines or [line()]})
         self.s.admission_action(a["id"], "submit")
         if approve:
             a = self.s.admission_action(a["id"], "approve", {"cbp_ref": "ACE-1"})
         return a
 
-    def lot(self, **kw):
-        self.admission([line(**kw)])
+    def lot(self, entry_date=None, **kw):
+        self.admission([line(**kw)], entry_date=entry_date)
         return self.s.list_lots()[0]
 
     def permit(self, acts=("manipulate", "manufacture", "exhibit", "destroy", "temp_removal"), **kw):
@@ -259,7 +259,7 @@ class TestInbond(Base):
             self.s.inbond_action(b2["id"], "cancel")
 
     def test_overdue_and_late_arrival(self):
-        b = self.ib(self.lot(), issued_date=days(-40))
+        b = self.ib(self.lot(entry_date=days(-60)), issued_date=days(-40))
         self.assertTrue(self.s.get_inbond(b["id"])["overdue"])
         self.s.inbond_action(b["id"], "arrive", {"date": TODAY})
         got = self.s.get_inbond(b["id"])
