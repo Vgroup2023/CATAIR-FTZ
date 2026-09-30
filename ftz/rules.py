@@ -34,7 +34,12 @@ DEFAULT_SETTINGS = {
     "transit_days_TE": "30",
     "transit_days_IE": "30",
     "expiry_warning_days": "30",
+    # fifo = oldest stock must be used first (default). specific = lot-specific identification, only where CBP has approved it.
+    "inventory_method": "fifo",
+    # 1 = a WMS receiving mismatch blocks submitting an e214 instead of only warning.
+    "require_wms_match": "0",
 }
+CHOICE_SETTINGS = {"inventory_method": ("fifo", "specific"), "require_wms_match": ("0", "1")}
 
 
 def parse_date(value):
@@ -92,6 +97,9 @@ def validate_line(line, idx, *, allow_domestic_blank_hts=True, require_rate=True
         errs.append(p + "HTSUS must be 10 digits (NNNN.NN.NNNN)")
     elif not hts and not (status == "D" and allow_domestic_blank_hts) and status in ZONE_STATUSES:
         errs.append(p + "HTSUS number is required")
+    q2, u2 = num(line.get("qty2")), str(line.get("uom2") or "").strip()
+    if (q2 is not None) != bool(u2) or (q2 is not None and q2 <= 0):
+        errs.append(p + "customs quantity and customs unit go together (both, greater than 0, or neither)")
     if foreign and not str(line.get("coo") or "").strip():
         errs.append(p + "country of origin is required for foreign merchandise")
     if status == "PF" and require_rate:
