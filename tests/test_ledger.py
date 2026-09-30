@@ -338,7 +338,7 @@ class TestIntegrationHttp(unittest.TestCase):
     def test_entry_worksheet_page_and_integrity_endpoint(self):
         con = db.connect(os.environ["FTZ_DB"])
         s = Service(con, "seed")
-        lot = next(l for l in s.list_lots() if l["zone_status"] == "PF")
+        lot = min((l for l in s.list_lots() if l["zone_status"] == "PF" and l["qty_on_hand"] > 0), key=lambda l: (l["received_on"], l["id"]))   # FIFO: oldest first
         s.withdraw({"lot_id": lot["id"], "kind": "consumption", "qty": 5, "date": TODAY, "entry_no": "ENT 42/A"})
         con.commit()
         con.close()

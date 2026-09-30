@@ -25,7 +25,7 @@ class ReconMixin:
                     breaks.append(f"{table} row {r['id']}: content was changed after it was recorded")
                 prev, n = r["hash"], n + 1
             legacy = self.con.execute(f"SELECT COUNT(*) FROM {table} WHERE hash IS NULL").fetchone()[0]
-            result["tables"][table] = {"rows_verified": n, "rows_before_chaining": legacy, "breaks": breaks[:50]}
+            result["tables"][table] = {"rows_verified": n, "rows_before_chaining": legacy, "breaks": breaks[:50], "head": prev}
             result["ok"] = result["ok"] and not breaks
         return result
 

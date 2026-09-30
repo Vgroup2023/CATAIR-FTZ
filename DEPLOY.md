@@ -13,8 +13,11 @@ There is one shared database, so run a **single instance**, and always serve ove
 | `FTZ_TRUST_PROXY` | `1` when behind Render/Caddy so secure cookies and rate limits work |
 | `FTZ_BASE_URL`, `FTZ_SMTP_HOST`, `FTZ_SMTP_PORT`, `FTZ_SMTP_USER`, `FTZ_SMTP_PASSWORD`, `FTZ_SMTP_FROM` | Turn on emailed reset links (STARTTLS SMTP). `FTZ_BASE_URL` is your public address, e.g. `https://ftz.example.com` |
 | `FTZ_DB` | Database path (must be on a persistent disk) |
+| `FTZ_RECON_AUTO`, `FTZ_RECON_HOURS` | Daily reconciliation job: `0` turns it off; interval in hours (default 24) |
 
 If no account exists at start-up, the server creates `admin` with a one-time password and prints it in the log (Render: **Logs** tab).
+
+Existing databases are upgraded automatically at start-up (new columns and safeguards are added; old history is kept).
 
 ## Demo login and forgotten passwords
 * **Demo:** with `FTZ_DEMO_MODE=true` the front page shows the `demo-admin` credentials. That account sees sample data, cannot change its password, manage users or download backups. Anyone on the internet can use it, so keep real data off any site that has demo mode on.
