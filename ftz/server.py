@@ -20,6 +20,7 @@ from .demo import seed_demo_data
 from .service import ApiError, Service
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 EXPORTS = {"admissions", "admission_lines", "lots", "movements", "permits", "activities",
            "inbonds", "inbond_lines", "audit"}
 
@@ -157,7 +158,9 @@ def print_page(kind, svc, ident):
 # What an ERP/WMS integration token may call (everything else needs a signed-in person).
 INTEGRATION_ALLOWED = [("POST", r"/api/wms/(receipts|inventory)"), ("POST", r"/api/parts(/import)?"), ("GET", r"/api/parts"),
                        ("POST", r"/api/admissions"), ("GET", r"/api/admissions/\d+/check"), ("GET", r"/api/lookups")]
-PUBLIC_FILES = {"/style.css", "/auth.css", "/auth.js", "/logo.png", "/compass.png", "/favicon.png"}
+# Files a browser needs before anyone signs in (look-and-feel plus what makes the app installable). None contain data.
+PUBLIC_FILES = {"/style.css", "/auth.css", "/auth.js", "/pwa.js", "/logo.png", "/compass.png", "/favicon.png", "/manifest.webmanifest",
+                "/sw.js", "/offline.html", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png"}
 COOKIE = "ftz_session"
 
 

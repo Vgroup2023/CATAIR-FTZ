@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d2250">
+<title>Offline - Globlexus FTZ Control</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/auth.css">
+</head>
+<body class="auth solo">
+<main class="panel">
+  <div class="card auth-card" style="text-align:center">
+    <img class="mini-logo" src="/logo.png" alt="Globlexus Group">
+    <h2>You're offline</h2>
+    <p class="hint">FTZ Control keeps one live ledger on the server so every device sees the same stock, duty and audit trail. It needs a connection to show or change records.</p>
+    <p class="hint">Nothing you did was lost: anything already saved is safe on the server.</p>
+    <button class="primary wide" type="button" onclick="location.reload()">Try again</button>
+  </div>
+</main>
+<script>addEventListener("online", () => location.reload());</script>
+</body>
+</html>

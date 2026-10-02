@@ -51,3 +51,11 @@ textarea{min-height:60px}.wide{grid-column:1/-1}.checks{display:flex;gap:14px;fl
 .lines{overflow-x:auto}.lines input,.lines select{min-width:64px}
 code{background:var(--infobg);padding:1px 5px;border-radius:4px;font-size:12px}
 h3{font-size:14px;margin:14px 0 6px}
+[hidden]{display:none!important}
+button.signout[data-install]{margin-top:8px}
+/* phones and tablets */
+@media (pointer:coarse){button,.btn{min-height:42px}button.sm{min-height:34px;padding:6px 12px}nav a{padding-top:12px;padding-bottom:12px}th,td{padding:10px 9px}}
+@media (max-width:760px){input,select,textarea{font-size:16px}h1{font-size:19px}.card{padding:12px}.modal{padding:2vh 6px}.modal>div{padding:14px 12px}.bar{gap:6px}.stat b{font-size:20px}
+  aside{padding:10px 0 6px}.brand{padding:0 12px 6px}.brand img{width:84px}nav a{white-space:nowrap;padding:9px 14px;border-left:0;border-bottom:3px solid transparent}nav a.on{border-bottom-color:var(--gold-light)}
+  .user{padding:8px 14px;display:flex;gap:10px;align-items:center}.user .who{margin:0}.user #who{display:flex;gap:10px;align-items:center;flex:1}button.signout{width:auto}}
+@supports (padding:max(0px)){body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}aside{padding-top:max(16px,env(safe-area-inset-top))}main{padding-bottom:max(22px,env(safe-area-inset-bottom))}}
