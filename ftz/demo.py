@@ -64,6 +64,10 @@ def seed_demo_data(con):
     s.import_wms_inventory({"snapshot_on": d(0), "rows": [
         {"part_no": "SPK-100", "qty": 557, "uom": "PCS"}, {"part_no": "TEE-200", "qty": 2000, "uom": "PCS"},
         {"part_no": "CHG-300", "qty": 120, "uom": "PCS"}]}, source="demo")
+    s.save_erp_link({"client": "Demo Importer Inc.", "party_id": imp, "system": "Oracle NetSuite", "method": "api", "url": "https://example.com/netsuite-sandbox",
+                     "notes": "Sample link: receipts pushed nightly by the client's NetSuite."})
+    s.save_erp_link({"client": "Demo Consignee GmbH", "party_id": con_, "system": "SAP S/4HANA", "method": "csv", "url": "https://example.com/sap-portal",
+                     "notes": "Sample link: weekly CSV export from SAP."})
     s.run_reconciliation("demo")
     con.commit()
     return True

@@ -59,3 +59,4 @@ button.signout[data-install]{margin-top:8px}
   aside{padding:10px 0 6px}.brand{padding:0 12px 6px}.brand img{width:84px}nav a{white-space:nowrap;padding:9px 14px;border-left:0;border-bottom:3px solid transparent}nav a.on{border-bottom-color:var(--gold-light)}
   .user{padding:8px 14px;display:flex;gap:10px;align-items:center}.user .who{margin:0}.user #who{display:flex;gap:10px;align-items:center;flex:1}button.signout{width:auto}}
 @supports (padding:max(0px)){body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}aside{padding-top:max(16px,env(safe-area-inset-top))}main{padding-bottom:max(22px,env(safe-area-inset-bottom))}}
+td a,.sub a,.alert a{color:var(--link);white-space:nowrap}td a:hover{text-decoration:none}

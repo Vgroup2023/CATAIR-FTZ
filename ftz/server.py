@@ -60,6 +60,9 @@ def routes():
     add("GET", "/api/wms", lambda s, m, b, q: s.list_wms())
     add("POST", "/api/wms/receipts", lambda s, m, b, q: s.import_receipts(b))
     add("POST", "/api/wms/inventory", lambda s, m, b, q: s.import_wms_inventory(b))
+    add("GET", "/api/erp-links", lambda s, m, b, q: {"links": s.list_erp_links(), "systems": integration.ERP_SYSTEMS, "methods": integration.ERP_METHODS})
+    add("POST", "/api/erp-links", lambda s, m, b, q: s.save_erp_link(b))
+    add("POST", r"/api/erp-links/(\d+)/delete", lambda s, m, b, q: s.delete_erp_link(int(m[1])))
     add("GET", "/api/recon", lambda s, m, b, q: s.recon_overview())
     add("POST", "/api/recon/run", lambda s, m, b, q: s.run_reconciliation("manual"))
     add("GET", "/api/integrity", lambda s, m, b, q: s.verify_integrity())
@@ -245,7 +248,8 @@ class Handler(BaseHTTPRequestHandler):
     # ---- /auth/* (some public, some need a session)
     def auth_route(self, con, method, path, body, user):
         if method == "GET" and path == "/auth/config":
-            return self.json(200, {"demo": auth.demo_credentials(), "email_reset": auth.smtp_ready()})
+            return self.json(200, {"demo": auth.demo_credentials(), "email_reset": auth.smtp_ready(),
+                                   "contact": (os.environ.get("FTZ_CONTACT_EMAIL") or "").strip() or None})
         if method == "POST" and path == "/auth/login":
             uname, ip = str(body.get("username") or "").strip().lower(), self.client_ip()
             key = f"u:{uname}|{ip}"
@@ -359,6 +363,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.static("/app.js")
                 if path.startswith(("/api/users", "/api/tokens")):
                     return self.admin_route(con, method, path, body, user)
+                if method != "GET" and path.startswith("/api/erp-links") and user.get("is_demo"):
+                    raise ApiError("the shared demo account cannot change client ERP links", 403)   # a public login must not plant links others may click
                 svc = Service(con, user["username"])
                 if method == "GET" and path.startswith("/print/"):
                     m = re.match(r"^/print/(\w+)/([^/]+)$", path)

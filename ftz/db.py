@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS wms_inventory(
 CREATE TABLE IF NOT EXISTS api_tokens(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL, created_by TEXT, created_at TEXT,
   last_used TEXT, active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS erp_links(
+  id INTEGER PRIMARY KEY, client TEXT NOT NULL, party_id INTEGER, system TEXT NOT NULL, url TEXT NOT NULL, method TEXT NOT NULL DEFAULT 'api',
+  notes TEXT, active INTEGER NOT NULL DEFAULT 1, updated_by TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS recon_runs(
   id INTEGER PRIMARY KEY, run_at TEXT, kind TEXT, run_by TEXT, issues INTEGER, summary TEXT);
 """

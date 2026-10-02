@@ -10,24 +10,31 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="FTZ Control">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Globlexus FTZ Control - Sign in</title>
+<title>Globlexus FTZ Control - Every unit accounted for. Every audit answered.</title>
+<meta name="description" content="Foreign-trade zone and bonded-warehouse control: e214 admissions, e216 permits, in-bond IT/TE/IE, FIFO ledger, WMS checks and daily reconciliation, connected to the ERP you already run.">
+<meta property="og:title" content="Globlexus FTZ Control - Every unit accounted for. Every audit answered.">
+<meta property="og:description" content="One exact, audit-ready ledger for foreign-trade zones and bonded warehouses.">
+<meta property="og:type" content="website">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="auth.css">
 </head>
-<body class="auth">
+<body class="auth landing">
+<div class="auth-top">
 <section class="hero">
   <img class="hero-logo" src="logo.png" alt="Globlexus Group">
-  <h1>Foreign-Trade Zone &amp; Bonded Warehouse Control</h1>
-  <p class="lead">One system for zone admissions, activity permits and in-bond movements, with an audit trail behind every change.</p>
+  <p class="eyebrow">Foreign-Trade Zone &amp; Bonded Warehouse Control</p>
+  <h1>Every unit accounted for.<span> Every audit answered.</span></h1>
+  <p class="lead">Globlexus FTZ Control turns zone admissions, activity permits and in-bond movements into one exact, audit-ready ledger, so your team moves freight instead of chasing paperwork.</p>
   <ul class="points">
-    <li><b>e214</b> admission &amp; status designation (PF · NPF · D · ZR) with 214B / 214A / 214C sheets</li>
-    <li><b>e216</b> activity permits: manipulate, manufacture, exhibit, destroy, temporary removal</li>
-    <li><b>In-bond</b> IT (61) · TE (62) · IE (63) with due-date tracking and proof of closure</li>
-    <li>Lot-level inventory, duty estimates, weekly-entry and reconciliation reports</li>
+    <li><b>Exact:</b> FIFO enforced, commercial and customs units that always close to zero</li>
+    <li><b>Checked early:</b> e214s tested against your WMS and product master before they are filed</li>
+    <li><b>Provable:</b> a tamper-evident history you can verify in one click</li>
+    <li><b>Connected:</b> fed by the ERP you already run, over a secure API or simple CSV</li>
   </ul>
+  <p class="cta-row"><a class="btn gold" href="#why">See what it does</a><a class="btn ghost-light" href="#connect">Connect your ERP</a></p>
 </section>
-<main class="panel">
+<main class="panel" id="signin-panel">
   <div class="card auth-card">
     <div id="signin">
       <h2>Sign in</h2>
@@ -64,6 +71,64 @@
   <button class="wide" data-install hidden type="button">Install this app on your device</button>
   <p class="foot">Globlexus Group · FTZ Control</p>
 </main>
+</div>
+
+<section class="mk" id="why">
+  <p class="kicker">Why operators choose it</p>
+  <h2>Built for the people who answer to CBP</h2>
+  <p class="sub-lead">Zone work is unforgiving: one wrong balance, one missed deadline, one unexplained adjustment. FTZ Control is designed so those problems are stopped at the keyboard, not found in an audit.</p>
+  <div class="cards">
+    <article><h3>One ledger, exact to the last decimal</h3><p>Every lot traces from its e214 line to its last withdrawal. Commercial and customs units move together, so partial shipments never leave a rounding gap.</p></article>
+    <article><h3>FIFO that enforces itself</h3><p>Oldest stock goes first. An out-of-order withdrawal is refused with the lot you should use, and one click splits a withdrawal across lots for you.</p></article>
+    <article><h3>Problems caught before filing</h3><p>Each e214 is checked against your WMS receiving log and product master before it is submitted. A daily reconciliation flags overages, shortages and receipts nobody admitted.</p></article>
+    <article><h3>In-bond without the sweat</h3><p>IT, TE and IE movements with due dates, late-arrival flags and proof of closure, so no bond stays open by accident.</p></article>
+    <article><h3>A history nobody can quietly edit</h3><p>The audit log and stock ledger are append-only and fingerprinted. Verify the whole chain in one click, and note the fingerprint outside the system.</p></article>
+    <article><h3>Type it once</h3><p>Your product master fills HTSUS, origin, units and duty rate. 3461 / 7501 data worksheets come straight from the ledger, ready for your broker to file.</p></article>
+    <article><h3>On every screen you use</h3><p>Install it on a desktop, tablet or phone. One live ledger, the same numbers everywhere.</p></article>
+  </div>
+</section>
+
+<section class="mk tinted" id="how">
+  <p class="kicker">How it works</p>
+  <h2>From inbound truck to audit-ready, in three moves</h2>
+  <ol class="steps">
+    <li><b>Connect</b><span>Send parts, receipts and counts from your ERP or WMS, or import a CSV. Nothing to re-key.</span></li>
+    <li><b>Operate</b><span>Admit with e214, process under e216, ship by consumption, export, transfer or in-bond. Every step is validated as you go.</span></li>
+    <li><b>Stay audit-ready</b><span>Daily reconciliation, integrity checks and entry worksheets are always one click away.</span></li>
+  </ol>
+</section>
+
+<section class="mk" id="connect">
+  <p class="kicker">Connections</p>
+  <h2>Connect the ERP you already run</h2>
+  <p class="sub-lead">Your master ERP stays the system of record for orders, stock and finance. FTZ Control sits beside it: your systems push parts, receipts and counts in, and the zone ledger your auditors need comes back out.</p>
+  <ul class="chips" aria-label="Systems customers commonly connect">
+    <li>SAP</li><li>Oracle NetSuite</li><li>Microsoft Dynamics 365</li><li>QuickBooks</li><li>Odoo</li><li>Sage</li><li>Infor</li><li>Epicor</li><li>Acumatica</li><li class="any">Any system that can export CSV or call a web API</li>
+  </ul>
+  <div class="cards three">
+    <article><h3>1. Get a feed-only key</h3><p>Your administrator issues a secure API key per client. It can send data in; it cannot approve, withdraw or read anything else.</p></article>
+    <article><h3>2. Send your data</h3><p>Post JSON from your ERP or WMS, or drop in a CSV, for parts, receiving logs and physical counts.</p></article>
+    <article><h3>3. See mismatches early</h3><p>Differences between what your systems say and what the zone ledger says surface before they reach CBP.</p></article>
+  </div>
+  <p class="fine">Connections use secure API keys and CSV files. System names are trademarks of their owners, listed only to show what customers commonly connect; no endorsement, certification or vendor-built plug-in is implied.</p>
+  <p class="contact" data-contact hidden><a class="btn gold" href="#" data-contact-link>Talk to us about your ERP</a></p>
+</section>
+
+<section class="mk band" id="audit">
+  <h2>Ready when CBP asks</h2>
+  <ul class="ticks">
+    <li>Lot-level traceability from admission to release</li>
+    <li>Append-only history with one-click verification</li>
+    <li>Daily reconciliation of ledger, WMS and open obligations</li>
+    <li>Printable worksheets for e214, e216, 7512 and 3461 / 7501 data</li>
+  </ul>
+  <p><a class="btn gold" href="#signin-panel">Sign in or try the demo</a></p>
+</section>
+
+<footer class="mk-foot">
+  <p>Globlexus Group · FTZ Control</p>
+  <p class="fine">FTZ Control prepares the data your team or broker files in ACE; it does not transmit filings to CBP.</p>
+</footer>
 <script src="pwa.js"></script>
 <script src="auth.js"></script>
 </body>

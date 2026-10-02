@@ -27,6 +27,10 @@ if ($("#login-form")) {
         $("#username").value = c.demo.username; $("#password").value = c.demo.password; $("#login-form button[type=submit]").focus();
       });
     }
+    if (c.contact) {
+      document.querySelectorAll("[data-contact]").forEach((el) => (el.hidden = false));
+      document.querySelectorAll("[data-contact-link]").forEach((a) => (a.href = "mailto:" + encodeURIComponent(c.contact).replace("%40", "@") + "?subject=" + encodeURIComponent("ERP connection enquiry")));
+    }
     $("#forgot-hint").textContent = c.email_reset
       ? "Enter your user name or email. We will email a reset link that works once, for 30 minutes."
       : "Enter your user name. Email is not set up on this server, so the reset link goes to the site administrator, who can pass it on. It works once, for 30 minutes.";
