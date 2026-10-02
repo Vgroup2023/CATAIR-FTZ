@@ -598,8 +598,61 @@ function partForm(p) {
     { name: "pga_agencies", label: "PGA agencies to review (FDA, USDA, EPA, CPSC, FCC…)" }, { name: "active", label: "Active", type: "checkbox" }];
   formModal(p ? `Edit ${p.part_no}` : "New part", f, p ? { ...p, active: !!p.active } : { active: true }, "Save part", async (v) => { await post("/api/parts", v); toast("Part saved"); refresh(); });
 }
+/* ---- client ERP connections ---- */
+function safeLink(url) {   // only ever render https links, always with noopener, and show where it goes
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:") return "";
+    return h("a", { href: u.href, target: "_blank", rel: "noopener noreferrer", onclick: (e) => e.stopPropagation() }, u.hostname + " ↗");
+  } catch { return ""; }
+}
+function erpForm(link, erp) {
+  const f = [
+    { name: "client", label: "Client", required: true },
+    { name: "party_id", label: "Linked client record (optional)", type: "select", options: opts(L.parties.filter((p) => ["importer", "consignee"].includes(p.kind)).map((p) => [p.id, p.name])) },
+    { name: "system", label: "ERP system", type: "select", options: erp.systems.map((x) => [x, x]), required: true },
+    { name: "method", label: "How it connects", type: "select", options: Object.entries(erp.methods) },
+    { name: "url", label: "Link to the client's ERP or portal (https://…)", required: true, wide: true },
+    { name: "notes", label: "Notes (contact, environment, schedule…)", type: "textarea", wide: true },
+    { name: "active", label: "Active", type: "checkbox" },
+  ];
+  formModal(link ? `Edit ${link.client}` : "New client ERP connection", f, link ? { ...link, active: !!link.active } : { method: "api", active: true }, "Save connection",
+    async (v) => { await post("/api/erp-links", { ...v, id: link && link.id }); toast("Connection saved"); refresh(); });
+}
+function downloadCSV(name, text) {
+  const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/csv" })), download: name });
+  document.body.append(a); a.click(); a.remove();
+}
+const FEEDS = [
+  { id: "parts", title: "Parts (product master)", endpoint: "/api/parts/import", file: "parts-template.csv",
+    cols: [["part_no", "Your ERP item / material number", true], ["description", "Item description"], ["htsus", "10-digit HTSUS, NNNN.NN.NNNN"], ["coo", "2-letter country of origin"],
+      ["uom", "Commercial unit (PCS, BOX…)"], ["uom2", "Customs unit (KG, DOZ…)"], ["conv", "Customs units per commercial unit"], ["duty_rate", "Duty rate %, for PF"],
+      ["default_status", "PF, NPF, D or ZR"], ["pga_agencies", "Agencies to review: FDA, USDA, EPA, CPSC, FCC…"]],
+    example: "SPK-100,Bluetooth speakers,8518.22.0000,CN,PCS,KG,0.35,4.9,PF,FCC" },
+  { id: "receipts", title: "Receiving log (WMS receipts)", endpoint: "/api/wms/receipts", file: "receipts-template.csv",
+    cols: [["receipt_no", "WMS receipt or ASN number", true], ["part_no", "Part number", true], ["qty", "Quantity received, above 0", true], ["uom", "Unit"],
+      ["received_on", "YYYY-MM-DD"], ["ref", "Bill of lading / AWB: what each e214 is checked against"]],
+    example: "RCV-1001,SPK-100,500,PCS,2026-10-01,BL12345" },
+  { id: "inventory", title: "Physical inventory count (WMS)", endpoint: "/api/wms/inventory", file: "inventory-template.csv",
+    cols: [["part_no", "Part number", true], ["qty", "Counted quantity", true], ["uom", "Unit"]],
+    example: "SPK-100,497,PCS" },
+];
+function connectionGuide(erp) {
+  const base = location.origin;
+  const body = h("div", {},
+    h("p", { class: "sub" }, `Your client's ERP stays the system of record. It sends three feeds to this site, either by a scheduled CSV file or by a web request (the "API"). Use whichever your client's ERP supports; both do the same thing.`),
+    h("ol", {}, h("li", {}, "Create a feed-only API key for the client under ", h("b", {}, "API access"), " below. It can send data in; it cannot approve, withdraw or read anything else."),
+      h("li", {}, "In the client's ERP, schedule an export or outbound web request to the addresses below, using the columns listed."),
+      h("li", {}, "Check ", h("b", {}, "Reports → Reconciliation"), " after the first load: mismatches between the ERP/WMS and the zone ledger show there.")),
+    FEEDS.map((f) => h("div", { class: "card" },
+      h("div", { class: "bar" }, h("b", { class: "grow" }, f.title), h("button", { class: "sm", onclick: () => downloadCSV(f.file, f.cols.map((c) => c[0]).join(",") + "\n" + f.example + "\n") }, "Download CSV template")),
+      h("p", { class: "sub" }, "Send to ", h("code", {}, `POST ${base}${f.endpoint}`), " with header ", h("code", {}, "Authorization: Bearer <key>"), " and body ", h("code", {}, '{"rows":[{…}]}'), ", or import the CSV on this page."),
+      table([{ h: "Column", f: (c) => h("code", {}, c[0]) }, { h: "Meaning", f: (c) => c[1] }, { h: "", f: (c) => c[2] ? tag("required", "warn") : "" }], f.cols))),
+    h("p", { class: "sub" }, "Column names are not case-sensitive. A row with a problem is rejected on its own and reported back; the rest are imported."));
+  modal("Connection guide & CSV templates", body);
+}
 VIEWS.integration = async () => {
-  const [parts, wms] = await Promise.all([get("/api/parts"), get("/api/wms")]);
+  const [parts, wms, erp] = await Promise.all([get("/api/parts"), get("/api/wms"), get("/api/erp-links")]);
   const tokens = isAdmin() ? await get("/api/tokens") : null;
   const snap = wms.inventory[0] && wms.inventory[0].snapshot_on;
   const newToken = () => formModal("New API token", [{ name: "name", label: "Name (e.g. WMS feed, ERP sync)", required: true }], {}, "Create token", async (v) => {
@@ -608,7 +661,16 @@ VIEWS.integration = async () => {
       h("input", { readonly: true, value: t.token, onclick: (e) => e.target.select() }),
       h("div", { class: "bar" }, h("button", { class: "primary", onclick: async () => { try { await navigator.clipboard.writeText(t.token); toast("Copied"); } catch { toast("Select the text and copy it"); } } }, "Copy"), h("button", { onclick: () => close() }, "Done"))), { narrow: true });
   });
-  return h("div", {}, head("Integrations & Parts", "Product master for smart mapping, WMS feeds for validation and reconciliation, and API tokens for ERP/WMS systems."),
+  const canEdit = !ME.is_demo;
+  return h("div", {}, head("Integrations & Parts", "Client ERP connections, the product master for smart mapping, WMS feeds for validation and reconciliation, and API tokens for ERP/WMS systems."),
+    h("h2", {}, `Client ERP connections (${erp.links.length})`),
+    h("div", { class: "bar" }, canEdit && h("button", { class: "primary", onclick: () => erpForm(null, erp) }, "+ Client connection"),
+      h("button", { onclick: () => connectionGuide(erp) }, "Connection guide & CSV templates"),
+      h("span", { class: "sub" }, "Where each client's master ERP lives and how it feeds this system. Links open in a new tab.")),
+    h("div", { class: "card" }, table([{ h: "Client", k: "client" }, { h: "ERP system", k: "system" }, { h: "How it connects", f: (x) => erp.methods[x.method] || x.method },
+      { h: "Open", f: (x) => safeLink(x.url) }, { h: "Status", f: (x) => tag(x.active ? "active" : "paused", x.active ? "ok" : "warn") }, { h: "Notes", k: "notes" },
+      { h: "", f: (x) => canEdit ? h("button", { class: "sm danger", onclick: async (e) => { e.stopPropagation(); if (confirm(`Remove the ${x.system} connection for ${x.client}?`) && await act(() => post(`/api/erp-links/${x.id}/delete`))) refresh(); } }, "Remove") : "" }],
+      erp.links, canEdit ? (x) => erpForm(x, erp) : null, "No client connections yet. Add each client's ERP so everyone knows where their data comes from.")),
     h("h2", {}, `Product master (${parts.length})`),
     h("div", { class: "bar" }, h("button", { class: "primary", onclick: () => partForm() }, "+ Part"),
       h("button", { onclick: () => csvImport("Import product master", "part_no,description,htsus,coo,uom,uom2,conv,duty_rate,default_status,pga_agencies", "/api/parts/import") }, "Import CSV")),

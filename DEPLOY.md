@@ -12,6 +12,7 @@ There is one shared database, so run a **single instance**, and always serve ove
 | `FTZ_DEMO_PASSWORD` | Optional custom demo password (default `Demo-FTZ-2026!`) |
 | `FTZ_TRUST_PROXY` | `1` when behind Render/Caddy so secure cookies and rate limits work |
 | `FTZ_BASE_URL`, `FTZ_SMTP_HOST`, `FTZ_SMTP_PORT`, `FTZ_SMTP_USER`, `FTZ_SMTP_PASSWORD`, `FTZ_SMTP_FROM` | Turn on emailed reset links (STARTTLS SMTP). `FTZ_BASE_URL` is your public address, e.g. `https://ftz.example.com` |
+| `FTZ_CONTACT_EMAIL` | Optional: shows a "Talk to us about your ERP" button on the front page |
 | `FTZ_DB` | Database path (must be on a persistent disk) |
 | `FTZ_RECON_AUTO`, `FTZ_RECON_HOURS` | Daily reconciliation job: `0` turns it off; interval in hours (default 24) |
 

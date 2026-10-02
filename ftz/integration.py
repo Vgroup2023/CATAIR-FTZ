@@ -2,6 +2,7 @@
 import hashlib
 import re
 import secrets
+from urllib.parse import urlparse
 
 from . import rules
 from .common import ApiError, dec, need, pick, r4
@@ -23,7 +24,64 @@ def find_token(con, token):
     return {"id": 0, "username": f"api:{t['name']}", "role": "integration", "is_demo": 0, "active": 1, "email": None}
 
 
+ERP_SYSTEMS = ["SAP S/4HANA", "SAP Business One", "Oracle NetSuite", "Oracle Fusion / E-Business Suite", "Microsoft Dynamics 365",
+               "Microsoft Dynamics Business Central", "QuickBooks", "Odoo", "Sage Intacct", "Sage X3", "Infor", "Epicor", "Acumatica",
+               "Other / in-house system"]
+ERP_METHODS = {"api": "Secure API (push)", "csv": "CSV import / scheduled file", "manual": "Manual / not connected yet"}
+
+
+def clean_https_url(u):
+    """A link people will click: https only, no embedded password, no markup or whitespace."""
+    u = str(u or "").strip()
+    need(u and len(u) <= 500 and not re.search(r"[\s<>\"'\\\x00-\x1f]", u), "enter a web address such as https://erp.example.com")
+    p = urlparse(u)
+    need(p.scheme == "https" and p.hostname and not p.username and not p.password,
+         "only secure https:// addresses (without a user name or password in them) are allowed")
+    return u
+
+
 class IntegrationMixin:
+    # ------------------------------------------------------- client ERP connection links
+    def list_erp_links(self):
+        return rows(self.con, """SELECT e.*, p.name party_name FROM erp_links e LEFT JOIN parties p ON p.id=e.party_id
+                                 ORDER BY e.active DESC, LOWER(e.client)""")
+
+    def save_erp_link(self, d):
+        if d.get("id"):                       # an update keeps every field the caller did not send
+            cur = one(self.con, "SELECT * FROM erp_links WHERE id=?", (d["id"],))
+            need(cur, "connection not found", 404)
+            d = {**{k: cur[k] for k in ("client", "party_id", "system", "url", "method", "notes", "active")}, **d}
+        party = None
+        if d.get("party_id"):
+            party = one(self.con, "SELECT id, name FROM parties WHERE id=?", (d["party_id"],))
+            need(party, "that client does not exist")
+        client = str(d.get("client") or "").strip() or (party["name"] if party else "")
+        need(client and len(client) <= 120, "enter the client's name")
+        system = str(d.get("system") or "").strip()
+        need(system and len(system) <= 80, "choose or enter the ERP system")
+        method = d.get("method") or "api"
+        need(method in ERP_METHODS, "connection method must be api, csv or manual")
+        notes = str(d.get("notes") or "").strip()
+        need(len(notes) <= 1000, "notes are limited to 1000 characters")
+        vals = (client, party["id"] if party else None, system, clean_https_url(d.get("url")), method, notes or None,
+                0 if d.get("active") in (0, False, "0", "false") else 1, self.user, now())
+        if d.get("id"):
+            need(one(self.con, "SELECT id FROM erp_links WHERE id=?", (d["id"],)), "connection not found", 404)
+            self.con.execute("""UPDATE erp_links SET client=?,party_id=?,system=?,url=?,method=?,notes=?,active=?,updated_by=?,updated_at=?
+                                WHERE id=?""", vals + (d["id"],))
+            lid = d["id"]
+        else:
+            lid = self.con.execute("""INSERT INTO erp_links(client,party_id,system,url,method,notes,active,updated_by,updated_at)
+                                      VALUES(?,?,?,?,?,?,?,?,?)""", vals).lastrowid
+        audit(self.con, self.user, "update" if d.get("id") else "create", "erp_link", lid, {"client": client, "system": system})
+        return one(self.con, "SELECT * FROM erp_links WHERE id=?", (lid,))
+
+    def delete_erp_link(self, lid):
+        need(one(self.con, "SELECT id FROM erp_links WHERE id=?", (lid,)), "connection not found", 404)
+        self.con.execute("DELETE FROM erp_links WHERE id=?", (lid,))
+        audit(self.con, self.user, "delete", "erp_link", lid)
+        return {"ok": True}
+
     # ------------------------------------------------------------ product master
     def _part(self, part_no):
         return one(self.con, "SELECT * FROM parts WHERE part_no=?", (part_no,)) if part_no else None

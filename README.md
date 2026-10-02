@@ -22,6 +22,11 @@ The feature set follows the areas listed for Thomson Reuters ONESOURCE FTZ Manag
 duty-free scrap/re-export/transfers, reporting). Not yet built: bill-of-materials driven consumption, a PGA database,
 and ACE/AES transmission.
 
+## Front page and client ERP connections
+* **Front page** (what visitors see before signing in): the tagline *"Every unit accounted for. Every audit answered."*, what the system does, how it works, a "Connect the ERP you already run" section, and the sign-in / demo / forgot-password cards. Set `FTZ_CONTACT_EMAIL` to add a "Talk to us about your ERP" button that opens an email to that address.
+* **The page's claims are limited to what is built.** It says connections use secure API keys and CSV files, lists common ERP names only to show what customers connect, and states that no endorsement, certification or vendor-built plug-in is implied. Please keep it that way if you edit the copy; add a connector claim only once the connector exists.
+* **Client ERP connections** (*Integrations & Parts*): for each client, record the ERP system, how it connects (API / CSV / not yet), a link to their ERP or portal, and notes. Only `https://` links are accepted (no embedded passwords, no markup); they open in a new tab with `noopener`. The shared demo account can view but not change them. The **Connection guide & CSV templates** button lists the exact columns and endpoints for the parts, receiving-log and inventory-count feeds and downloads a ready-made CSV for each.
+
 ## Install it on a computer, tablet or phone
 Open your site (it must be served over **HTTPS**, which Render and the VPS guide both do) and install it like an app: its own icon, its own window, no browser bars.
 
