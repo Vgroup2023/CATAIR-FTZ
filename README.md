@@ -22,6 +22,20 @@ The feature set follows the areas listed for Thomson Reuters ONESOURCE FTZ Manag
 duty-free scrap/re-export/transfers, reporting). Not yet built: bill-of-materials driven consumption, a PGA database,
 and ACE/AES transmission.
 
+## Install it on a computer, tablet or phone
+Open your site (it must be served over **HTTPS**, which Render and the VPS guide both do) and install it like an app: its own icon, its own window, no browser bars.
+
+| Device | How |
+|---|---|
+| **Windows / Mac / Chromebook** (Chrome or Edge) | Click the install icon at the right of the address bar, or the **Install** button on the sign-in page, or menu → *Install FTZ Control*. |
+| **Android** (Chrome) | Tap **Install this app on your device** on the sign-in page, or menu ⋮ → *Install app / Add to Home screen*. |
+| **iPhone / iPad** (Safari) | Tap **Share** → **Add to Home Screen** → *Add*. (iOS only offers this in Safari.) |
+| **Mac** (Safari 17+) | File → *Add to Dock*. |
+
+It is the same live system in every window, so changes show on all devices at once. **It does not work offline by design**: the ledger, FIFO checks and audit trail live on the server, and offline edits could not be reconciled safely. Offline you get a friendly "you're offline" page. The service worker stores only the look-and-feel files, never pages, records, documents or exports, so a shared device cannot show someone else's data. After you sign out, nothing private remains on it.
+
+*Want it in the App Store or Google Play instead?* That needs the same site wrapped in a small native shell (and developer accounts); it is not included here.
+
 ## Ledger controls, automation and integrations
 
 | Need | What the system does |

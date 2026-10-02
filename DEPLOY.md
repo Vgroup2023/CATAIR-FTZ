@@ -1,7 +1,7 @@
 # Hosting the FTZ system
 
 The app has its own sign-in page with accounts stored in the database (passwords hashed with PBKDF2, sessions in an HttpOnly cookie).
-There is one shared database, so run a **single instance**, and always serve over **HTTPS** (both options below do).
+There is one shared database, so run a **single instance**, and always serve over **HTTPS** (both options below do; browsers only offer to install the app over HTTPS).
 
 | Variable | Meaning |
 |---|---|

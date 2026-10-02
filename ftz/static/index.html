@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d2250">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FTZ Control">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Globlexus FTZ Control</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="stylesheet" href="style.css">
@@ -11,12 +18,13 @@
 <aside id="nav">
   <div class="brand"><img src="logo.png" alt="Globlexus Group"><small>FTZ Control</small></div>
   <nav id="menu"></nav>
-  <div class="user" id="who"></div>
+  <div class="user"><div id="who"></div><button class="sm signout" data-install hidden type="button">Install app</button></div>
 </aside>
 <main>
   <div id="toast" role="status"></div>
   <div id="view"></div>
 </main>
+<script src="pwa.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

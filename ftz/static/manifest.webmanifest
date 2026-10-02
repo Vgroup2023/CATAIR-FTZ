@@ -1,0 +1,23 @@
+{
+  "id": "/",
+  "name": "Globlexus FTZ Control",
+  "short_name": "FTZ Control",
+  "description": "Foreign-Trade Zone and bonded warehouse control: e214 admissions, e216 permits, in-bond IT / TE / IE, ledger and reconciliation.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#06122b",
+  "theme_color": "#0d2250",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Dashboard", "url": "/#dashboard", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Zone Inventory", "url": "/#inventory", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "In-Bond", "url": "/#inbonds", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
