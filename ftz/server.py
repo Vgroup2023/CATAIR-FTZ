@@ -60,6 +60,16 @@ def routes():
     add("GET", "/api/wms", lambda s, m, b, q: s.list_wms())
     add("POST", "/api/wms/receipts", lambda s, m, b, q: s.import_receipts(b))
     add("POST", "/api/wms/inventory", lambda s, m, b, q: s.import_wms_inventory(b))
+    # CATAIR FT (Input) filings
+    add("GET", "/api/ft/spec", lambda s, m, b, q: s.ft_spec())
+    add("GET", "/api/ft", lambda s, m, b, q: s.ft_list())
+    add("POST", "/api/ft", lambda s, m, b, q: s.ft_save(b))
+    add("POST", "/api/ft/check", lambda s, m, b, q: s.ft_check(b))
+    add("POST", r"/api/ft/from-admission/(\d+)", lambda s, m, b, q: s.ft_from_admission(int(m[1])))
+    add("GET", r"/api/ft/(\d+)", lambda s, m, b, q: s.ft_get(int(m[1])))
+    add("GET", r"/api/ft/(\d+)/exports", lambda s, m, b, q: s.ft_exports(int(m[1])))
+    add("POST", r"/api/ft/(\d+)/delete", lambda s, m, b, q: s.ft_delete(int(m[1])))
+    add("POST", r"/api/ft/(\d+)/export", lambda s, m, b, q: s.ft_export(int(m[1]), b))
     add("GET", "/api/erp-links", lambda s, m, b, q: {"links": s.list_erp_links(), "systems": integration.ERP_SYSTEMS, "methods": integration.ERP_METHODS})
     add("POST", "/api/erp-links", lambda s, m, b, q: s.save_erp_link(b))
     add("POST", r"/api/erp-links/(\d+)/delete", lambda s, m, b, q: s.delete_erp_link(int(m[1])))
@@ -356,11 +366,11 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "GET" and path == "/":
                     return self.static("/index.html" if user else "/login.html")
                 if user is None:
-                    if path.startswith("/api/") or path == "/app.js":
+                    if path.startswith("/api/") or path in ("/app.js", "/ft.js"):
                         raise ApiError("sign in required", 401)
                     return self.send(302, "", "text/plain", {"Location": "/"})
-                if method == "GET" and path == "/app.js":
-                    return self.static("/app.js")
+                if method == "GET" and path in ("/app.js", "/ft.js"):
+                    return self.static(path)
                 if path.startswith(("/api/users", "/api/tokens")):
                     return self.admin_route(con, method, path, body, user)
                 if method != "GET" and path.startswith("/api/erp-links") and user.get("is_demo"):

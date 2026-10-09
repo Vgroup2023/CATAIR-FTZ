@@ -1,16 +1,18 @@
 """Business operations. Every mutating call is audited and runs in one transaction."""
 import json
+import re
 
 from . import rules
 from .common import ApiError, need, pick, proportional, r4, round_q  # noqa: F401  (re-exported for other modules)
 from .db import MOVE_FIELDS, audit, chain_hash, last_hash, next_no, now, one, rows
+from .ftfiling import FtFilingMixin
 from .integration import IntegrationMixin
 from .recon import ReconMixin
 
 EPS = 1e-4
 
 
-class Service(IntegrationMixin, ReconMixin):
+class Service(IntegrationMixin, ReconMixin, FtFilingMixin):
     def __init__(self, con, user="unknown"):
         self.con, self.user = con, user or "unknown"
 
@@ -21,7 +23,11 @@ class Service(IntegrationMixin, ReconMixin):
     def set_settings(self, data):
         for k, v in data.items():
             need(k in rules.DEFAULT_SETTINGS, f"unknown setting {k}")
-            if k in rules.CHOICE_SETTINGS:
+            if k in rules.TEXT_SETTINGS:
+                v = str(v or "").strip().upper()
+                rx, what = rules.TEXT_SETTINGS[k]
+                need(v == "" or re.fullmatch(rx, v), f"{k} must be {what} (or empty)")
+            elif k in rules.CHOICE_SETTINGS:
                 need(str(v) in rules.CHOICE_SETTINGS[k], f"{k} must be one of: {', '.join(rules.CHOICE_SETTINGS[k])}")
             else:
                 need(str(v).isdigit() and int(v) > 0, f"{k} must be a positive whole number")
@@ -36,8 +42,9 @@ class Service(IntegrationMixin, ReconMixin):
         need(d.get("zone_no") and d.get("name"), "zone number and name are required")
         try:
             cur = self.con.execute(
-                "INSERT INTO zones(zone_no,name,grantee,port_code,address) VALUES(?,?,?,?,?)",
-                (d["zone_no"].strip(), d["name"].strip(), d.get("grantee"), d.get("port_code"), d.get("address")))
+                "INSERT INTO zones(zone_no,name,grantee,port_code,address,firms) VALUES(?,?,?,?,?,?)",
+                (d["zone_no"].strip(), d["name"].strip(), d.get("grantee"), d.get("port_code"), d.get("address"),
+                 (str(d.get("firms") or "").strip().upper() or None)))
         except Exception:
             raise ApiError("zone number already exists")
         audit(self.con, self.user, "create", "zone", cur.lastrowid, d)

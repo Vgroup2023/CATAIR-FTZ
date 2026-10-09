@@ -38,8 +38,14 @@ DEFAULT_SETTINGS = {
     "inventory_method": "fifo",
     # 1 = a WMS receiving mismatch blocks submitting an e214 instead of only warning.
     "require_wms_match": "0",
+    # ABI batch envelope for CATAIR FT files (A/B/Y/Z records). The ABI communication password is never stored.
+    "abi_site_code": "", "abi_sender_id": "", "abi_office_code": "", "abi_filer_code": "", "abi_port_code": "",
 }
 CHOICE_SETTINGS = {"inventory_method": ("fifo", "specific"), "require_wms_match": ("0", "1")}
+# text settings: key -> (regex the upper-cased value must match, description). Empty is allowed.
+TEXT_SETTINGS = {"abi_site_code": (r"[A-Z0-9]{4}", "4 letters/numbers"), "abi_sender_id": (r"[A-Z0-9]{3}", "3 letters/numbers"),
+                 "abi_office_code": (r"[A-Z0-9]{2}", "2 letters/numbers"), "abi_filer_code": (r"[A-Z0-9]{3}", "3 letters/numbers"),
+                 "abi_port_code": (r"[A-Z0-9]{4}", "4 letters/numbers")}
 
 
 def parse_date(value):

@@ -27,6 +27,14 @@ and ACE/AES transmission.
 * **The page's claims are limited to what is built.** It says connections use secure API keys and CSV files, lists common ERP names only to show what customers connect, and states that no endorsement, certification or vendor-built plug-in is implied. Please keep it that way if you edit the copy; add a connector claim only once the connector exists.
 * **Client ERP connections** (*Integrations & Parts*): for each client, record the ERP system, how it connects (API / CSV / not yet), a link to their ERP or portal, and notes. Only `https://` links are accepted (no embedded passwords, no markup); they open in a new tab with `noopener`. The shared demo account can view but not change them. The **Connection guide & CSV templates** button lists the exact columns and endpoints for the parts, receiving-log and inventory-count feeds and downloads a ready-made CSV for each.
 
+## CATAIR FT filing (e214 electronic admission)
+*CATAIR FT Filing* builds the FT (Input) records for an admission as the ACE CATAIR Foreign Trade Zone chapter defines them (v3.1.3, Aug 2026, Pub # 0875-0826): 80-character fixed-width records FT10, FT11/12, FT20, FT40-43, FT50/51, FT60/61, laid out by the chapter's input record usage map (loops: conveyance 999, bill of lading 9,999, HTS line 9,999) and its per-action maps (Add, Replace, Status Change, Temporary Deposit, Delete).
+* Start blank, or press **Build CATAIR FT filing** on an e214 to prefill header, bill and HTS lines from it. Anything the e214 does not hold (MID, mode of transport, dates) is listed for you to enter; nothing is invented.
+* The side panel checks the filing live (field class/length, required fields, loop limits, usage map) and shows the exact 80-column records with a ruler.
+* **Export** gives the complete batch (A, B, FT records, Y, Z) or the body only. Fill *Setup → Settings → ABI envelope* first. The ABI password is typed per export and never stored; each export is logged (without the password) and a filing that was exported cannot be deleted.
+* `python3 tools/verify_catair.py FTZ_CATAIR.pdf [BatchBlock.pdf]` re-checks the code's layouts against the CBP PDF (121 fields).
+* **Limits:** this does not transmit to CBP; use your ABI software or broker. A/B/Y/Z come from the separate ABI Batch and Block Control chapter (Oct 2021 draft) and FT is treated as ESAR-style there; confirm with your ABI vendor. Mode-of-transport codes are only checked as 2 digits. CBP-side checks (bond, FIRMS, HTS validity, Prior Notice) cannot be done offline.
+
 ## Install it on a computer, tablet or phone
 Open your site (it must be served over **HTTPS**, which Render and the VPS guide both do) and install it like an app: its own icon, its own window, no browser bars.
 
