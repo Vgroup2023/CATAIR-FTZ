@@ -118,15 +118,17 @@ class IntegrationMixin:
         agencies = [a.strip().upper() for a in re.split(r"[,;\s]+", str(d.get("pga_agencies") or "")) if a.strip()]
         need(all(AGENCY.match(a) for a in agencies), "agency codes must be letters/numbers, e.g. FDA, USDA, EPA, CPSC, FCC")
         active = 0 if d.get("active") in (0, False, "0", "false") else 1
+        mid = str(d.get("mid") or "").strip().upper() or None
+        need(mid is None or re.fullmatch(r"[A-Z0-9]{1,22}", mid), "MID must be 1-22 letters/numbers (the Manufacturer Identification Code)")
         vals = (part_no, (d.get("description") or "").strip() or None, hts, (d.get("coo") or "").strip().upper() or None,
-                (d.get("uom") or "").strip() or None, uom2, conv, duty, status, ",".join(agencies) or None, active, source, now())
+                (d.get("uom") or "").strip() or None, uom2, conv, duty, status, ",".join(agencies) or None, active, source, now(), mid)
         existing = self._part(part_no)
         if existing:
             self.con.execute("""UPDATE parts SET part_no=?,description=?,htsus=?,coo=?,uom=?,uom2=?,conv=?,duty_rate=?,default_status=?,
-                                pga_agencies=?,active=?,source=?,updated_at=? WHERE id=?""", vals + (existing["id"],))
+                                pga_agencies=?,active=?,source=?,updated_at=?,mid=? WHERE id=?""", vals + (existing["id"],))
         else:
             self.con.execute("""INSERT INTO parts(part_no,description,htsus,coo,uom,uom2,conv,duty_rate,default_status,pga_agencies,
-                                active,source,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", vals)
+                                active,source,updated_at,mid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", vals)
         audit(self.con, self.user, "update" if existing else "create", "part", part_no, {"htsus": hts, "source": source})
         return self._part(part_no)
 

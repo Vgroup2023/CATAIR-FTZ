@@ -57,7 +57,7 @@ class TestInstallableApp(unittest.TestCase):
         self.assertNotIn("cache", nav.replace("caches.match", ""))   # navigations are fetched live, never put in a cache
 
     def test_private_things_stay_private(self):
-        for path, expect in (("/app.js", 401), ("/api/lookups", 401), ("/api/audit", 401), ("/backup", 302), ("/print/admission/1", 302), ("/export/lots.csv", 302)):
+        for path, expect in (("/app.js", 401), ("/ft.js", 401), ("/api/lookups", 401), ("/api/audit", 401), ("/backup", 302), ("/print/admission/1", 302), ("/export/lots.csv", 302)):
             self.assertEqual(self.site.call("GET", path)[0], expect, path)
 
     def test_pages_link_the_manifest(self):

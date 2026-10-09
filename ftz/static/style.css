@@ -60,3 +60,20 @@ button.signout[data-install]{margin-top:8px}
   .user{padding:8px 14px;display:flex;gap:10px;align-items:center}.user .who{margin:0}.user #who{display:flex;gap:10px;align-items:center;flex:1}button.signout{width:auto}}
 @supports (padding:max(0px)){body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}aside{padding-top:max(16px,env(safe-area-inset-top))}main{padding-bottom:max(22px,env(safe-area-inset-bottom))}}
 td a,.sub a,.alert a{color:var(--link);white-space:nowrap}td a:hover{text-decoration:none}
+/* CATAIR FT builder */
+.ftcols{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px;align-items:start}
+.ftcols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.ftsidebox{position:sticky;top:10px;max-height:calc(100vh - 20px);overflow:auto}
+.ftform{min-width:0}.ftsec h3{margin-top:0}
+.ftgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 10px}
+.ftgrid.ftref{margin:4px 0}
+.ftf{display:block;font-size:12px;color:var(--mute)}.ftf small{display:block;font-size:10px;opacity:.75}
+.ftline,.ftbill{border-left:3px solid var(--line);padding-left:10px;margin:10px 0}.ftbill{border-left-color:var(--accent)}
+.ftlist{margin:6px 0}.ftrow{display:flex;gap:6px;align-items:center;margin:3px 0}
+.ftscroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px;padding:6px 0}
+.ftline80{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;display:flex;gap:8px;padding:0 8px}
+.ftline80:hover{background:var(--infobg)}.ruler{color:var(--mute);border-bottom:1px solid var(--line);margin-bottom:2px}
+.rid{display:inline-block;min-width:34px;color:var(--link)}.sp{opacity:.35}
+.ftmap tr.miss{background:var(--badbg)}.ftmap td,.ftmap th{padding:4px 6px}
+.up{text-transform:uppercase}
+@media (max-width:1000px){.ftcols,.ftcols3{grid-template-columns:1fr}.ftsidebox{position:static;max-height:none}}

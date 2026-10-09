@@ -1,7 +1,7 @@
 /* Service worker: makes the app installable and keeps the look-and-feel files available.
  * It deliberately NEVER stores pages, API answers, documents or exports: those are private and must always
  * come live from the server, so a shared device cannot show someone else's ledger. */
-const VERSION = "ftz-shell-v1";
+const VERSION = "ftz-shell-v2";
 const SHELL = ["/offline.html", "/style.css", "/auth.css", "/logo.png", "/compass.png", "/icon-192.png"];
 const STATIC = new Set([...SHELL, "/favicon.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png", "/auth.js", "/pwa.js", "/manifest.webmanifest"]);
 
@@ -21,7 +21,7 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(fetch(req).catch(() => caches.match("/offline.html")));
     return;
   }
-  if (STATIC.has(p) || p === "/app.js") {                                                   // assets: newest first, cached copy if offline
+  if (STATIC.has(p) || p === "/app.js" || p === "/ft.js") {                                                   // assets: newest first, cached copy if offline
     e.respondWith(fetch(req).then((res) => {
       if (res.ok && STATIC.has(p)) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
       return res;

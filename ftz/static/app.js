@@ -129,7 +129,7 @@ const MODE_OPTS = () => opts(L.modes.map((m) => [m, m]));
 
 /* ---------- routing ---------- */
 const NAV = [
-  ["dashboard", "Dashboard"], ["sep", "Foreign-Trade Zone"], ["admissions", "e214 Admissions"], ["permits", "e216 Permits & Activity"],
+  ["dashboard", "Dashboard"], ["sep", "Foreign-Trade Zone"], ["admissions", "e214 Admissions"], ["catair", "CATAIR FT Filing"], ["permits", "e216 Permits & Activity"],
   ["inventory", "Zone Inventory"], ["sep", "Bonded movements"], ["inbonds", "In-Bond IT · TE · IE"], ["sep", "System"],
   ["reports", "Reports"], ["integration", "Integrations & Parts"], ["setup", "Setup"], ["audit", "Audit & Export"], ["sep", "Account"], ["account", "My Account"], ["users", "Users"],
 ];
@@ -271,6 +271,7 @@ async function admissionDetail(id) {
       a.status === "draft" && btn("Submit to CBP", () => submitFlow(a.id, () => doAct("submit", {}, "Submitted")), "primary"),
       a.status === "submitted" && btn("Record CBP approval", () => formModal("Record approval", [{ name: "cbp_ref", label: "CBP / ACE reference", required: true }], {}, "Approve & admit to inventory", (v) => doAct("approve", v, "Approved — lots created")), "primary"),
       a.status === "submitted" && btn("Record rejection", () => formModal("Record rejection", [{ name: "reason", label: "Reason", type: "textarea", wide: true, required: true }], {}, "Reject", (v) => doAct("reject", v, "Rejected"))),
+      btn("Build CATAIR FT filing", async () => { const r = await act(() => post(`/api/ft/from-admission/${id}`)); if (r) { close(); await ftOpen(r.id, r.notes); } }),
       canEdit && btn("Delete", () => confirm("Delete this e214?") && doAct("delete", {}, "Deleted"), "danger"),
       h("span", { class: "grow" }), h("a", { class: "btn", href: `/print/admission/${id}`, target: "_blank" }, "Print worksheet")),
     kv([["Zone", `${a.zone_no || ""} ${a.zone_name || ""}`], ["Operator", a.operator_name], ["Importer", a.importer_name], ["Carrier", a.carrier_name],
@@ -508,17 +509,19 @@ VIEWS.setup = async () => {
     head("Setup", "Zones, parties and system settings."),
     h("div", { class: "bar" }, h("button", { onclick: () => formModal("New zone / warehouse", [
       { name: "zone_no", label: "Zone no. (e.g. FTZ 123)", required: true }, { name: "name", label: "Name", required: true }, { name: "grantee", label: "Grantee" },
-      { name: "port_code", label: "Port code" }, { name: "address", label: "Address", wide: true }], {}, "Save", async (v) => { await post("/api/zones", v); refresh(); }) }, "+ Zone"),
+      { name: "port_code", label: "Port code" }, { name: "firms", label: "FIRMS code (4 chars, for CATAIR FT)" }, { name: "address", label: "Address", wide: true }], {}, "Save", async (v) => { await post("/api/zones", v); refresh(); }) }, "+ Zone"),
       h("button", { onclick: () => formModal("New party", [
         { name: "kind", label: "Type", type: "select", options: L.party_kinds.map((k) => [k, k]) }, { name: "name", label: "Name", required: true },
         { name: "ident", label: "EIN / importer no. / SCAC" }, { name: "address", label: "Address", wide: true }], {}, "Save", async (v) => { await post("/api/parties", v); refresh(); }) }, "+ Party")),
-    h("h2", {}, "Zones"), h("div", { class: "card" }, table([{ h: "Zone", k: "zone_no" }, { h: "Name", k: "name" }, { h: "Grantee", k: "grantee" }, { h: "Port", k: "port_code" }], L.zones, null, "Add a zone first.")),
+    h("h2", {}, "Zones"), h("div", { class: "card" }, table([{ h: "Zone", k: "zone_no" }, { h: "Name", k: "name" }, { h: "Grantee", k: "grantee" }, { h: "Port", k: "port_code" }, { h: "FIRMS", k: "firms" }], L.zones, null, "Add a zone first.")),
     h("h2", {}, "Parties"), h("div", { class: "card" }, table([{ h: "Type", k: "kind" }, { h: "Name", k: "name" }, { h: "ID", k: "ident" }], L.parties, null, "No parties.")),
     h("h2", {}, "Settings"), h("div", { class: "card" }, (() => {
       const f = [{ name: "inventory_method", label: "Inventory method", type: "select", options: [["fifo", "FIFO (oldest stock first)"], ["specific", "Specific identification (only if CBP approved)"]] },
         { name: "require_wms_match", label: "WMS receiving mismatch", type: "select", options: [["0", "Warn only"], ["1", "Block e214 submission"]] },
         { name: "lines_per_sheet", label: "Lines per 214 / 214A sheet" }, { name: "transit_days_IT", label: "IT transit days" },
-        { name: "transit_days_TE", label: "TE transit days" }, { name: "transit_days_IE", label: "IE transit days" }, { name: "expiry_warning_days", label: "Permit expiry warning (days)" }];
+        { name: "transit_days_TE", label: "TE transit days" }, { name: "transit_days_IE", label: "IE transit days" }, { name: "expiry_warning_days", label: "Permit expiry warning (days)" },
+        { name: "abi_site_code", label: "ABI site code (4) — CATAIR envelope" }, { name: "abi_sender_id", label: "ABI sender ID (3)" }, { name: "abi_office_code", label: "ABI office code (2)" },
+        { name: "abi_filer_code", label: "ABI filer code (3)" }, { name: "abi_port_code", label: "ABI port code (4)" }];
       const errBox = h("div");
       const form = h("form", {}, h("p", { class: "sub" }, "Transit-day defaults are placeholders — set them to the time limit CBP grants at your port for each mode."),
         h("div", { class: "fields" }, f.map((x) => field(x, s[x.name]))), errBox, h("div", { class: "bar" }, h("button", { class: "primary" }, "Save settings")));
@@ -595,7 +598,7 @@ function partForm(p) {
     { name: "coo", label: "Country of origin (2 letters)" }, { name: "uom", label: "Commercial unit (PCS, BOX…)" }, { name: "uom2", label: "Customs unit (KG, DOZ…)" },
     { name: "conv", label: "Customs units per commercial unit", type: "number" }, { name: "duty_rate", label: "Duty rate % (for PF)", type: "number" },
     { name: "default_status", label: "Default zone status", type: "select", options: opts(STATUS_OPTS()) },
-    { name: "pga_agencies", label: "PGA agencies to review (FDA, USDA, EPA, CPSC, FCC…)" }, { name: "active", label: "Active", type: "checkbox" }];
+    { name: "pga_agencies", label: "PGA agencies to review (FDA, USDA, EPA, CPSC, FCC…)" }, { name: "mid", label: "Manufacturer ID (MID) — required on CATAIR FT lines" }, { name: "active", label: "Active", type: "checkbox" }];
   formModal(p ? `Edit ${p.part_no}` : "New part", f, p ? { ...p, active: !!p.active } : { active: true }, "Save part", async (v) => { await post("/api/parts", v); toast("Part saved"); refresh(); });
 }
 /* ---- client ERP connections ---- */
@@ -627,7 +630,7 @@ const FEEDS = [
   { id: "parts", title: "Parts (product master)", endpoint: "/api/parts/import", file: "parts-template.csv",
     cols: [["part_no", "Your ERP item / material number", true], ["description", "Item description"], ["htsus", "10-digit HTSUS, NNNN.NN.NNNN"], ["coo", "2-letter country of origin"],
       ["uom", "Commercial unit (PCS, BOX…)"], ["uom2", "Customs unit (KG, DOZ…)"], ["conv", "Customs units per commercial unit"], ["duty_rate", "Duty rate %, for PF"],
-      ["default_status", "PF, NPF, D or ZR"], ["pga_agencies", "Agencies to review: FDA, USDA, EPA, CPSC, FCC…"]],
+      ["default_status", "PF, NPF, D or ZR"], ["pga_agencies", "Agencies to review: FDA, USDA, EPA, CPSC, FCC…"], ["mid", "Manufacturer ID (for CATAIR FT)"]],
     example: "SPK-100,Bluetooth speakers,8518.22.0000,CN,PCS,KG,0.35,4.9,PF,FCC" },
   { id: "receipts", title: "Receiving log (WMS receipts)", endpoint: "/api/wms/receipts", file: "receipts-template.csv",
     cols: [["receipt_no", "WMS receipt or ASN number", true], ["part_no", "Part number", true], ["qty", "Quantity received, above 0", true], ["uom", "Unit"],
@@ -673,10 +676,10 @@ VIEWS.integration = async () => {
       erp.links, canEdit ? (x) => erpForm(x, erp) : null, "No client connections yet. Add each client's ERP so everyone knows where their data comes from.")),
     h("h2", {}, `Product master (${parts.length})`),
     h("div", { class: "bar" }, h("button", { class: "primary", onclick: () => partForm() }, "+ Part"),
-      h("button", { onclick: () => csvImport("Import product master", "part_no,description,htsus,coo,uom,uom2,conv,duty_rate,default_status,pga_agencies", "/api/parts/import") }, "Import CSV")),
+      h("button", { onclick: () => csvImport("Import product master", "part_no,description,htsus,coo,uom,uom2,conv,duty_rate,default_status,pga_agencies,mid", "/api/parts/import") }, "Import CSV")),
     h("div", { class: "card" }, table([{ h: "Part", k: "part_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" }, { h: "COO", k: "coo" }, { h: "Unit", k: "uom" },
       { h: "Customs unit", f: (x) => x.uom2 ? `${x.uom2}${x.conv ? " ×" + x.conv : ""}` : "" }, { h: "Duty %", k: "duty_rate", num: true }, { h: "Status", k: "default_status" },
-      { h: "PGA", k: "pga_agencies" }, { h: "Active", f: (x) => x.active ? "yes" : tag("no", "bad") }], parts, partForm, "No parts yet. Add them here, import a CSV, or push them from your ERP with an API token.")),
+      { h: "PGA", k: "pga_agencies" }, { h: "MID", k: "mid" }, { h: "Active", f: (x) => x.active ? "yes" : tag("no", "bad") }], parts, partForm, "No parts yet. Add them here, import a CSV, or push them from your ERP with an API token.")),
     h("h2", {}, "WMS receiving log"),
     h("div", { class: "bar" }, h("button", { onclick: () => csvImport("Import WMS receipts", "receipt_no,part_no,qty,uom,received_on,ref", "/api/wms/receipts") }, "Import CSV"),
       h("span", { class: "sub" }, "ref = the bill of lading / AWB the goods arrived on. It is what each e214 is checked against before submission.")),

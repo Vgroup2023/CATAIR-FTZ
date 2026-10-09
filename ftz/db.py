@@ -80,6 +80,12 @@ CREATE TABLE IF NOT EXISTS api_tokens(
 CREATE TABLE IF NOT EXISTS erp_links(
   id INTEGER PRIMARY KEY, client TEXT NOT NULL, party_id INTEGER, system TEXT NOT NULL, url TEXT NOT NULL, method TEXT NOT NULL DEFAULT 'api',
   notes TEXT, active INTEGER NOT NULL DEFAULT 1, updated_by TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS ft_filings(
+  id INTEGER PRIMARY KEY, label TEXT, admission_id INTEGER, action TEXT, admission_number TEXT, status TEXT NOT NULL DEFAULT 'draft',
+  data TEXT NOT NULL, created_by TEXT, created_at TEXT, updated_by TEXT, updated_at TEXT, exported_at TEXT);
+CREATE TABLE IF NOT EXISTS ft_exports(
+  id INTEGER PRIMARY KEY, filing_id INTEGER NOT NULL REFERENCES ft_filings(id), ts TEXT, user TEXT, mode TEXT, eol TEXT,
+  line_count INTEGER, sha256 TEXT, body TEXT);
 CREATE TABLE IF NOT EXISTS recon_runs(
   id INTEGER PRIMARY KEY, run_at TEXT, kind TEXT, run_by TEXT, issues INTEGER, summary TEXT);
 """
@@ -106,6 +112,7 @@ NEW_COLUMNS = [
     ("audit", "prev_hash", "TEXT"), ("audit", "hash", "TEXT"),
     ("activities", "qty2", "REAL"),
     ("inbond_lines", "qty2", "REAL"), ("inbond_lines", "part_no", "TEXT"),
+    ("zones", "firms", "TEXT"), ("parts", "mid", "TEXT"),
 ]
 
 # Database-level safeguards: they hold even if application code has a bug.
