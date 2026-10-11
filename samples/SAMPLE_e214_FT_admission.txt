@@ -1,0 +1,17 @@
+A5301DEMSAMPLE101126     FT                                                     
+B  5301DEMFT                                                                    
+10A999AB01  260001    N5301NDEM         00-000000000D99900-000000001            
+20A11DFLNDEMO CONTAINER SHIP    D001           20260917202609265301             
+40DEMOBL1001                                             0000002620CN57035      
+43DEMU1234567                                                                   
+50000018518220000    CN000000050000NO 000000017500KG                            
+5100000001750000000125000000000250P00000000                                     
+60BLUETOOTH SPEAKERS                           MIDCNDEMOFACT001                 
+50000026109100004    VN000000200000NO 000000036000KG                            
+5100000003600000000090000000000250N00000000                                     
+60COTTON T SHIRTS                              MIDVNDEMOGARM002                 
+50000038504409540    CN000000012000NO 000000000000                              
+5100000000400000000006000000000250Z00000000                                     
+60DEFECTIVE CHARGERS SCRAP BOUND               MIDCNDEMOFACT001                 
+Y  5301DEMFT                                                                    
+Z5301DEM      101126                                                            
