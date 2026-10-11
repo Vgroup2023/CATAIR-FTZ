@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS ft_filings(
 CREATE TABLE IF NOT EXISTS ft_exports(
   id INTEGER PRIMARY KEY, filing_id INTEGER NOT NULL REFERENCES ft_filings(id), ts TEXT, user TEXT, mode TEXT, eol TEXT,
   line_count INTEGER, sha256 TEXT, body TEXT);
+CREATE TABLE IF NOT EXISTS ft_responses(
+  id INTEGER PRIMARY KEY, filing_id INTEGER NOT NULL REFERENCES ft_filings(id), ts TEXT, user TEXT, admission_number TEXT, disposition TEXT,
+  message_type TEXT, message_code TEXT, outcome TEXT, summary TEXT, raw TEXT);
 CREATE TABLE IF NOT EXISTS recon_runs(
   id INTEGER PRIMARY KEY, run_at TEXT, kind TEXT, run_by TEXT, issues INTEGER, summary TEXT);
 """
@@ -112,7 +115,7 @@ NEW_COLUMNS = [
     ("audit", "prev_hash", "TEXT"), ("audit", "hash", "TEXT"),
     ("activities", "qty2", "REAL"),
     ("inbond_lines", "qty2", "REAL"), ("inbond_lines", "part_no", "TEXT"),
-    ("zones", "firms", "TEXT"), ("parts", "mid", "TEXT"),
+    ("zones", "firms", "TEXT"), ("parts", "mid", "TEXT"), ("ft_filings", "kind", "TEXT DEFAULT 'FT'"),
 ]
 
 # Database-level safeguards: they hold even if application code has a bug.

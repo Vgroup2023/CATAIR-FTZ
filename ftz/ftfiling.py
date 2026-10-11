@@ -3,13 +3,22 @@ import hashlib
 import json
 import re
 
-from . import catair
+from . import catair, catair_fz
 from .common import ApiError, need
 from .db import audit, now, one, rows
 
 MAX_DATA_BYTES = 4_000_000
 IOR_ANY = re.compile(r"\b(\d{2}-\d{9}|\d{3}-\d{2}-\d{4})\b")
 ABI_KEYS = ("site_code", "sender_id", "office_code", "filer_code", "port_code")
+
+
+KINDS = ("FT", "FZ")
+MAX_RESPONSE = 300_000
+STATUS_RANK = {"draft": 0, "ready": 1, "exported": 2, "rejected": 3, "accepted": 4, "authorized": 5}
+
+
+def compile_any(kind, data):
+    return catair_fz.compile_fz(data) if kind == "FZ" else catair.compile_filing(data)
 
 
 def empty_data():
@@ -24,6 +33,11 @@ class FtFilingMixin:
 
     def ft_spec(self):
         return {"source": catair.SOURCE, "layout": catair.layout_summary(), "maps": {k: {"title": v[0], "rows": v[1]} for k, v in catair.USAGE_MAPS.items()},
+                "fz": {"layout": {k: {"title": v["title"], "fields": [{kk: vv for kk, vv in f.items() if kk in ("key", "label", "start", "end", "len", "cls", "req", "help", "choices", "date")}
+                                                                      for f in v["fields"]]} for k, v in catair_fz.FZ_LAYOUT.items()},
+                       "actions": {k: {"title": v[0], "qualifiers": v[1]} for k, v in catair_fz.FZ_ACTIONS.items()}, "reasons": catair_fz.PAC_REASONS,
+                       "map": {"title": catair_fz.FZ_MAP[0], "rows": catair_fz.FZ_MAP[1]}, "limits": catair_fz.FZ_LIMITS},
+                "nf": {"scenarios": [{"disposition": k[0], "type": k[1], "code": k[2], "text": v[0], "outcome": v[1]} for k, v in catair_fz.NF_SCENARIOS.items()]},
                 "limits": catair.LIMITS, "admission_types": catair.ADMISSION_TYPES, "reasons": catair.REASONS, "abi": self.abi_profile(),
                 "ruler": "".join(str((i // 10) % 10) if i % 10 == 0 else "." for i in range(1, 81))}
 
@@ -34,7 +48,7 @@ class FtFilingMixin:
         return r
 
     def _ft_public(self, r, with_data=True):
-        out = {k: r[k] for k in ("id", "label", "admission_id", "action", "admission_number", "status", "created_by", "created_at",
+        out = {k: r[k] for k in ("id", "kind", "label", "admission_id", "action", "admission_number", "status", "created_by", "created_at",
                                  "updated_by", "updated_at", "exported_at")}
         if with_data:
             out["data"] = json.loads(r["data"])
@@ -45,12 +59,18 @@ class FtFilingMixin:
 
     def ft_get(self, fid):
         out = self._ft_public(self._ft_row(fid))
-        out["check"] = self.ft_check({"data": out["data"]})
+        out["check"] = self.ft_check({"data": out["data"], "kind": out.get("kind") or "FT"})
         return out
 
     @staticmethod
-    def _check_shape(data):
+    def _check_shape(data, kind="FT"):
         need(isinstance(data, dict), "filing data must be an object")
+        if kind == "FZ":
+            need(isinstance(data.get("actions", []), list), "actions must be a list")
+            for a in data.get("actions", []):
+                need(isinstance(a, dict), "each action must be an object")
+                need(isinstance(a.get("containers", []), list) and isinstance(a.get("remarks", []), list), "containers and remarks must be lists")
+            return
         need(isinstance(data.get("header", {}), dict), "header must be an object")
         need(isinstance(data.get("conveyances", []), list), "conveyances must be a list")
         for cv in data.get("conveyances", []):
@@ -63,18 +83,22 @@ class FtFilingMixin:
     def ft_check(self, d):
         """Validate unsaved or saved data; returns the compile result with the usage-map counts."""
         data = d.get("data")
-        self._check_shape(data)
-        res = catair.compile_filing(data)
+        kind = d.get("kind") or "FT"
+        need(kind in KINDS, "kind must be FT or FZ")
+        self._check_shape(data, kind)
+        res = compile_any(kind, data)
         res["records"] = [{"id": r["id"], "path": r["path"], "text": r["text"]} for r in res["records"]]
         return res
 
     def ft_save(self, d):
         data = d.get("data")
-        self._check_shape(data)
+        kind = d.get("kind") or (self._ft_row(d["id"])["kind"] if d.get("id") else "FT") or "FT"
+        need(kind in KINDS, "kind must be FT or FZ")
+        self._check_shape(data, kind)
         raw = json.dumps(data, separators=(",", ":"))
         need(len(raw) <= MAX_DATA_BYTES, "this filing is too large to save")
-        res = catair.compile_filing(data)
-        label = str(d.get("label") or "").strip()[:80] or (res["admission_number"] or "New FT filing")
+        res = compile_any(kind, data)
+        label = str(d.get("label") or "").strip()[:80] or (res["admission_number"] or f"New {kind} filing")
         action = res.get("action") or None
         status = "ready" if res["ok"] else "draft"
         adm = d.get("admission_id") or None
@@ -85,10 +109,10 @@ class FtFilingMixin:
                              (label, adm if adm else cur["admission_id"], action, res["admission_number"], status, raw, self.user, now(), d["id"]))
             fid, what = d["id"], "update"
         else:
-            fid = self.con.execute("""INSERT INTO ft_filings(label,admission_id,action,admission_number,status,data,created_by,created_at,updated_by,updated_at)
-                                      VALUES(?,?,?,?,?,?,?,?,?,?)""", (label, adm, action, res["admission_number"], status, raw, self.user, now(), self.user, now())).lastrowid
+            fid = self.con.execute("""INSERT INTO ft_filings(kind,label,admission_id,action,admission_number,status,data,created_by,created_at,updated_by,updated_at)
+                                      VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (kind, label, adm, action, res["admission_number"], status, raw, self.user, now(), self.user, now())).lastrowid
             what = "create"
-        audit(self.con, self.user, what, "ft_filing", fid, {"admission_number": res["admission_number"], "action": action, "ok": res["ok"]})
+        audit(self.con, self.user, what, "ft_filing", fid, {"kind": kind, "admission_number": res["admission_number"], "action": action, "ok": res["ok"]})
         return self.ft_get(fid)
 
     def ft_delete(self, fid):
@@ -108,7 +132,8 @@ class FtFilingMixin:
         """Build the transmission file. The ABI password is used for this call only: it is not stored, logged or audited."""
         r = self._ft_row(fid)
         data = json.loads(r["data"])
-        res = catair.compile_filing(data)
+        kind = r["kind"] or "FT"
+        res = compile_any(kind, data)
         if not res["ok"]:
             raise ApiError(["Fix these before exporting:"] + res["errors"][:15] + ([f"…and {len(res['errors']) - 15} more"] if len(res["errors"]) > 15 else []))
         mode = d.get("mode") or "batch"
@@ -118,7 +143,7 @@ class FtFilingMixin:
         body = [x["text"] for x in res["records"]]
         head = tail = None
         if mode == "batch":
-            head, tail, errs = catair.build_envelope(self.abi_profile(), d.get("password"))
+            head, tail, errs = catair.build_envelope(self.abi_profile(), d.get("password"), app=kind)
             if errs:
                 raise ApiError(errs)
         text = catair.render_file(body, head, tail, eol)
@@ -127,7 +152,7 @@ class FtFilingMixin:
                          (fid, now(), self.user, mode, "CRLF" if eol == "\r\n" else "LF", len(body), digest, "\n".join(body)))
         self.con.execute("UPDATE ft_filings SET status='exported', exported_at=? WHERE id=?", (now(), fid))
         audit(self.con, self.user, "export", "ft_filing", fid, {"admission_number": res["admission_number"], "mode": mode, "records": len(body), "sha256": digest})
-        name = f"FT-{res['admission_number'] or fid}-{res['action']}.txt"
+        name = f"{kind}-{res['admission_number'] or fid}-{res['action']}.txt"
         return {"filename": re.sub(r"[^A-Za-z0-9._-]", "_", name), "text": text, "line_count": len(text.splitlines()), "sha256": digest,
                 "warnings": res["warnings"]}
 
@@ -199,3 +224,45 @@ class FtFilingMixin:
         saved["notes"] = notes
         audit(self.con, self.user, "prefill", "ft_filing", saved["id"], {"from_admission": a["doc_no"]})
         return saved
+
+    # ------------------------------------------------------------------ CBP responses (NF) and broker-download copies (ZD)
+    def ft_decode(self, d):
+        text = str((d or {}).get("text") or "")
+        need(text.strip(), "paste the CBP response text first")
+        need(len(text) <= MAX_RESPONSE, "that file is too large")
+        return catair_fz.parse_output(text, str(d.get("kind") or "auto").lower())
+
+    def ft_matches(self, result):
+        """Filings a response is about: same admission number, or (FZ) the bill / in-bond / container it names."""
+        keys = {x for x in [result.get("admission_number")] + [r.get("id") for r in result.get("refs", [])] if x}
+        return [f for f in rows(self.con, "SELECT id, kind, label, admission_number, status FROM ft_filings WHERE admission_number<>''")
+                if f["admission_number"] in keys]
+
+    def ft_response(self, d):
+        """Decode a pasted CBP response, log it, and move the matching filings to accepted / rejected / authorized."""
+        dec = self.ft_decode(d)
+        need(dec["kind"] == "nf", "this looks like a ZD copy, not a CBP response; use Decode to read it")
+        need(dec["results"], "; ".join(dec["problems"]) or "no response found")
+        pinned = d.get("filing_id")
+        pin_row = self._ft_row(pinned) if pinned else None
+        out = []
+        raw = "\n".join(x["text"].rstrip() for x in dec["records"])
+        for r in dec["results"]:
+            targets = [pin_row] if pin_row else self.ft_matches(r)
+            msg = r["messages"][0] if r["messages"] else {}
+            for t in targets:
+                self.con.execute("""INSERT INTO ft_responses(filing_id,ts,user,admission_number,disposition,message_type,message_code,outcome,summary,raw)
+                                    VALUES(?,?,?,?,?,?,?,?,?,?)""", (t["id"], now(), self.user, r["admission_number"], r["disposition"], msg.get("type"),
+                                                                    msg.get("code"), r["outcome"], r["summary"][:300], raw))
+                new = {"accepted": "accepted", "warning": "accepted", "rejected": "rejected", "authorized": "authorized"}.get(r["outcome"])
+                cur = one(self.con, "SELECT status FROM ft_filings WHERE id=?", (t["id"],))["status"]
+                if new and (new == "rejected" or STATUS_RANK.get(new, 0) >= STATUS_RANK.get(cur, 0)):
+                    self.con.execute("UPDATE ft_filings SET status=? WHERE id=?", (new, t["id"]))
+                audit(self.con, self.user, "response", "ft_filing", t["id"], {"outcome": r["outcome"], "disposition": r["disposition"], "code": msg.get("code")})
+            r["filings"] = [{"id": t["id"], "label": t["label"], "kind": t["kind"]} for t in targets]
+            out.append(r)
+        return {"results": out, "records": dec["records"], "problems": dec["problems"], "matched": sum(1 for r in out if r["filings"])}
+
+    def ft_responses(self, fid):
+        self._ft_row(fid)
+        return rows(self.con, "SELECT id, ts, user, admission_number, disposition, message_code, outcome, summary FROM ft_responses WHERE filing_id=? ORDER BY id DESC", (fid,))

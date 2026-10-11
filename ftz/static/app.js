@@ -45,7 +45,7 @@ const opts = (list, blank = true) => [...(blank ? [["", "—"]] : []), ...list];
 const partyOpts = (kind) => opts(L.parties.filter((p) => !kind || p.kind === kind).map((p) => [p.id, p.name]));
 const zoneOpts = () => L.zones.map((z) => [z.id, `${z.zone_no} — ${z.name}`]);
 
-const TAGS = { approved: "ok", active: "ok", closed: "ok", returned: "ok", done: "ok", submitted: "warn", issued: "warn", in_transit: "warn",
+const TAGS = { accepted: "ok", authorized: "ok", ready: "warn", exported: "warn", approved: "ok", active: "ok", closed: "ok", returned: "ok", done: "ok", submitted: "warn", issued: "warn", in_transit: "warn",
   arrived: "warn", open: "warn", draft: "", rejected: "bad", revoked: "bad", expired: "bad", cancelled: "bad" };
 const tag = (s, extra) => h("span", { class: "tag " + (extra || TAGS[s] || "") }, String(s).replace("_", " "));
 
