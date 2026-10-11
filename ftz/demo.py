@@ -80,6 +80,11 @@ def seed_demo_data(con):
     for ln, kg in zip(bl["lines"], (175, 360, 0)):
         ln.update(uom1="NO", weight=kg or 40, charges=250)
     s.ft_save({"id": f["id"], "label": "Demo: complete FT filing (fictitious data)", "admission_id": first_adm["id"], "data": data})
+    adm_no = s.ft_get(f["id"])["admission_number"]
+    s.ft_save({"kind": "FZ", "label": "Demo: operator acceptance and PTT request (fictitious data)", "admission_id": first_adm["id"], "data": {"actions": [
+        {"qualifier": "1", "id_number": adm_no, "action": "H", "containers": [], "remarks": ["GOODS ACCEPTABLE"]},
+        {"qualifier": "2", "id_number": "DEMOBL1001", "action": "F", "received_qty": 2620, "irs": "00-000000001", "firms": "D999",
+         "admission_number": adm_no, "containers": [], "remarks": []}]}})
     s.run_reconciliation("demo")
     con.commit()
     return True

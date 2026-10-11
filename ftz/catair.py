@@ -727,7 +727,7 @@ def finish(ctx, result, mapkey):
 
 
 # ----------------------------------------------------------------------------------------------- batch envelope + file
-def build_envelope(abi, password, transmitted=None):
+def build_envelope(abi, password, transmitted=None, app=APP_ID):
     """A and B records (before) and Y and Z records (after) for the block. Returns (head, tail, errors)."""
     ctx = Ctx()
     abi = abi or {}
@@ -736,12 +736,13 @@ def build_envelope(abi, password, transmitted=None):
     pw = up(password)
     if not pw:
         ctx.err("Batch envelope", "Enter the ABI communication password (6 characters); it is used for this download only and is never stored")
-    vals = dict(site=abi.get("site_code"), sender=abi.get("sender_id"), password=pw, date=stamp, app=APP_ID, office=abi.get("office_code"),
+    vals = dict(site=abi.get("site_code"), sender=abi.get("sender_id"), password=pw, date=stamp, app=app, office=abi.get("office_code"),
                 port=abi.get("port_code"), filer=abi.get("filer_code"))
-    a = make_record(ctx, "A", "A record", vals, layout=ENVELOPE["A"])
-    b = make_record(ctx, "B", "B record", vals, layout=ENVELOPE["B"])
-    y = make_record(ctx, "Y", "Y record", vals, layout=ENVELOPE["Y"])
-    z = make_record(ctx, "Z", "Z record", vals, layout=ENVELOPE["Z"])
+    lay = {k: [dict(f, fixed=app) if f["key"] == "app" else f for f in v] for k, v in ENVELOPE.items()}   # FT = admission, FZ = concurrence / PTT / arrival
+    a = make_record(ctx, "A", "A record", vals, layout=lay["A"])
+    b = make_record(ctx, "B", "B record", vals, layout=lay["B"])
+    y = make_record(ctx, "Y", "Y record", vals, layout=lay["Y"])
+    z = make_record(ctx, "Z", "Z record", vals, layout=lay["Z"])
     return [a, b], [y, z], ctx.errors
 
 

@@ -4,7 +4,7 @@
     pip install pymupdf
     python3 tools/verify_catair.py FTZ_CATAIR.pdf [ABI_Batch_and_Block_Control.pdf]
 
-Compares, for every field of FT10-FT61 (and A/B/Y/Z when the second PDF is given): start-end position, length, class and
+Compares, for every field of FT10-FT61, FZ10-FZ20, NF90-NF95 and ZD10-ZD61 (and A/B/Y/Z when the second PDF is given): start-end position, length, class and
 M/C/O designation. Exits non-zero on any difference, so run it whenever CBP publishes a new CATAIR version.
 Treats the PDFs as untrusted input: it only reads text and table cells.
 """
@@ -19,7 +19,7 @@ try:
 except ImportError:                                   # older package name
     import fitz as pymupdf
 
-from ftz import catair
+from ftz import catair, catair_fz
 
 # A few CBP cells hold alternatives ("6D or 6S", or "32S 5N 27S" for ESAR vs eMAN): the first one is the ESAR layout FT uses.
 CLASS = re.compile(r"^(\d+)\s*([A-Z]+)\b")
@@ -57,7 +57,7 @@ def parse_tables(pdf, title_re, rows_ok):
     return found
 
 
-def compare(rid, pdf_fields, mine):
+def compare(rid, pdf_fields, mine, check_req=True):
     problems = []
     by_pos = {(f["start"], f["end"]): f for f in mine}
     seen = set()
@@ -70,10 +70,10 @@ def compare(rid, pdf_fields, mine):
         if f["len"] != ln or f["cls"] != cls:
             problems.append(f"{rid} '{f['label']}' {start}-{end}: layout {f['len']}{f['cls']} but PDF says {ln}{cls}")
         # Multi-part cells like "M- ESAR OR O- eMAN" are reported as differences only for the plain M/C/O case.
-        if status in ("M", "C", "O") and f["req"] != status:
+        if check_req and status in ("M", "C", "O") and f["req"] != status:
             problems.append(f"{rid} '{f['label']}' {start}-{end}: layout designation {f['req']} but PDF says {status}")
     for key, f in by_pos.items():
-        if key not in seen:
+        if key not in seen and f["key"] != "_id":      # a few CBP tables list the control identifier without a class
             problems.append(f"{rid}: layout has '{f['label']}' at {key[0]}-{key[1]} that the PDF table lacks")
     return problems
 
@@ -93,6 +93,20 @@ def main(argv):
         uniq = list(dict.fromkeys(fields))
         problems += compare(rid, uniq, spec["fields"])
         checked += len(uniq)
+    for pat, layouts, label, req in ((r"Record Identifier (FZ\d\d) \(Input\)", {k: v["fields"] for k, v in catair_fz.FZ_LAYOUT.items()}, "FZ", True),
+                                      (r"Record Identifier (NF\d\d) \(Output\)", catair_fz.NF_LAYOUT, "NF", True),
+                                      # ZD follows the FT layout (CBP labels the ZD12 table "FT12 (Input)"); designations differ by design, so only position/length/class are compared
+                                      (r"Record Identifier (ZD\d\d|FT12) \((?:Output|Input)\)", catair_fz.ZD_LAYOUT, "ZD", False)):
+        pdf = parse_tables(argv[1], re.compile(pat), None)
+        pdf = {("ZD12" if k == "FT12" else k): v for k, v in pdf.items()}
+        for rid, fields in layouts.items():
+            got = pdf.get(rid)
+            if not got:
+                problems.append(f"{rid}: no field table found in the PDF")
+                continue
+            uniq = list(dict.fromkeys(got))
+            problems += compare(rid, uniq, fields, req)
+            checked += len(uniq)
     if len(argv) > 2:
         env = parse_tables(argv[2], re.compile(r"^(?:.*\s)?Input ([ABYZ])-Record\b"), None)
         for rid, fields in catair.ENVELOPE.items():
