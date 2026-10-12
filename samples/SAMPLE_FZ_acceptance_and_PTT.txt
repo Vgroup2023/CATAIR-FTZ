@@ -1,0 +1,8 @@
+A5301DEMSAMPLE101126     FZ                                                     
+B  5301DEMFZ                                                                    
+101999AB01260001                      H                                         
+20GOODS ACCEPTABLE                                                              
+102DEMOBL1001                         F 0000002620  00-000000001D999            
+11               999AB01260001                                                  
+Y  5301DEMFZ                                                                    
+Z5301DEM      101126                                                            
