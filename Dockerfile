@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 COPY ftz ./ftz
 ENV FTZ_HOST=0.0.0.0 FTZ_DB=/data/ftz.db PYTHONUNBUFFERED=1
 RUN useradd -m app && mkdir /data && chown app /data

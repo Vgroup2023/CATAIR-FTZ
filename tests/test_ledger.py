@@ -1,7 +1,6 @@
 """FIFO, dual units, tamper-evidence, hard stops, product master, WMS validation, reconciliation, integrations."""
 import json
 import os
-import sqlite3
 import unittest
 
 os.environ.setdefault("FTZ_PBKDF2_ITER", "1000")
@@ -138,25 +137,30 @@ class TestHardStops(Base):
 
     def test_database_refuses_negative_stock(self):
         lot = self.lot()
-        with self.assertRaises(sqlite3.IntegrityError):
+        with self.assertRaises(db.INTEGRITY_ERRORS):
             self.con.execute("UPDATE lots SET qty_on_hand=-1 WHERE id=?", (lot["id"],))
 
     def test_history_is_append_only(self):
         lot = self.lot()
         for sql in ("UPDATE audit SET user='x'", "DELETE FROM audit", "UPDATE movements SET qty=999", "DELETE FROM movements"):
-            with self.assertRaises(sqlite3.IntegrityError, msg=sql):
+            self.con.execute("SAVEPOINT guard")
+            with self.assertRaises(db.INTEGRITY_ERRORS, msg=sql):
                 self.con.execute(sql)
+            self.con.execute("ROLLBACK TO guard")   # Postgres aborts the whole transaction after a refused statement
+
+    def drop_guard(self, name, table):
+        self.con.execute(f"DROP TRIGGER {name} ON {table}" if db.use_pg() else f"DROP TRIGGER {name}")
 
     def test_tampering_is_detected_even_if_safeguards_are_dropped(self):
         lot = self.lot()
         wd(self.s, lot, 10)
         self.assertTrue(self.s.verify_integrity()["ok"])
-        self.con.execute("DROP TRIGGER movements_no_update")
+        self.drop_guard("movements_no_update", "movements")
         self.con.execute("UPDATE movements SET qty=-1 WHERE kind='withdraw_export'")
         res = self.s.verify_integrity()
         self.assertFalse(res["ok"])
         self.assertIn("changed after it was recorded", res["tables"]["movements"]["breaks"][0])
-        self.con.execute("DROP TRIGGER audit_no_delete")
+        self.drop_guard("audit_no_update" if db.use_pg() else "audit_no_delete", "audit")
         self.con.execute("DELETE FROM audit WHERE id=(SELECT MIN(id) FROM audit)")
         self.assertTrue(self.s.verify_integrity()["tables"]["audit"]["breaks"])
 

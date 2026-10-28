@@ -4,6 +4,7 @@ import os
 import sqlite3
 from datetime import datetime
 
+from . import pgcompat
 from .rules import DEFAULT_SETTINGS
 
 SCHEMA = """
@@ -94,11 +95,32 @@ CREATE TABLE IF NOT EXISTS recon_runs(
 """
 
 
+def use_pg():
+    """True when DATABASE_URL (Supabase / Postgres) is configured; otherwise the SQLite file is used."""
+    return pgcompat.enabled()
+
+
+INTEGRITY_ERRORS = (sqlite3.IntegrityError,) + pgcompat.integrity_errors()
+
+
+def error_text(ex):
+    return pgcompat.message_of(ex) if not isinstance(ex, sqlite3.Error) else str(ex)
+
+
+def where():
+    """Human-readable location for the start-up banner (never includes a password)."""
+    if pgcompat.database_url():
+        return "PostgreSQL " + pgcompat.describe(pgcompat.database_url())
+    return db_path()
+
+
 def db_path():
     return os.environ.get("FTZ_DB", os.path.join(os.getcwd(), "ftz.db"))
 
 
 def connect(path=None):
+    if use_pg():
+        return pgcompat.connect(path)
     con = sqlite3.connect(path or db_path(), timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")
@@ -140,6 +162,8 @@ CREATE TRIGGER movements_no_delete BEFORE DELETE ON movements BEGIN SELECT RAISE
 
 
 def _migrate(con):
+    if use_pg():
+        return _migrate_pg(con)
     for table, col, decl in NEW_COLUMNS:
         if col not in [r[1] for r in con.execute(f"PRAGMA table_info({table})")]:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
@@ -149,12 +173,35 @@ def _migrate(con):
     con.executescript(TRIGGERS)
 
 
+def _migrate_pg(con):
+    """Postgres: build the schema from the SQLite one. FTZ_SKIP_DDL=1 leaves it alone (the app role then needs no DDL rights)."""
+    if os.environ.get("FTZ_SKIP_DDL") == "1":
+        return
+    has_ext = con.execute("SELECT 1 FROM pg_namespace WHERE nspname='extensions'").fetchone()
+    con.executescript("CREATE EXTENSION IF NOT EXISTS citext" + (" WITH SCHEMA extensions" if has_ext else ""))
+    con.executescript(pgcompat.schema_sql(SCHEMA, NEW_COLUMNS))
+    con.execute("""UPDATE lots SET received_on=COALESCE((SELECT entry_date FROM admissions a WHERE a.id=lots.admission_id),
+                   substr(created_at,1,10)) WHERE received_on IS NULL""")
+
+
 def init(con):
+    if use_pg():
+        _migrate(con)
+        for k, v in DEFAULT_SETTINGS.items():
+            con.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
+        con.commit()
+        return
     con.executescript(SCHEMA)
     _migrate(con)
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
     con.commit()
+
+
+def dump_all(con):
+    """Every table as plain rows (Postgres mode backup download)."""
+    names = [r[0] for r in con.execute("SELECT tablename FROM pg_tables WHERE schemaname = current_schema() ORDER BY 1").fetchall()]
+    return {t: rows(con, f"SELECT * FROM {t}") for t in names}
 
 
 def now():

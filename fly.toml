@@ -1,0 +1,33 @@
+# Fly.io: `fly launch --no-deploy --copy-config`, then set the secrets below and `fly deploy`.
+#   fly secrets set DATABASE_URL='postgresql://ftz_app:<password>@<supabase pooler host>:5432/postgres' FTZ_AUTH_PASSWORD='<long unique>'
+app = "globlexus-ftz"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  FTZ_HOST = "0.0.0.0"
+  PORT = "8214"
+  FTZ_TRUST_PROXY = "1"
+  FTZ_COOKIE_SECURE = "1"
+  FTZ_SKIP_DDL = "1"          # the schema comes from supabase/migrations; the app role needs no DDL rights
+  # FTZ_DEMO_MODE = "true"    # only for a sample-data site, never with real records
+
+[http_service]
+  internal_port = 8214
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

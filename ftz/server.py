@@ -404,8 +404,8 @@ class Handler(BaseHTTPRequestHandler):
                 con.close()
         except ApiError as ex:
             self.json(ex.status, {"errors": ex.errors})
-        except sqlite3.IntegrityError as ex:     # a database safeguard refused the change (e.g. negative stock)
-            self.json(409, {"errors": [f"Blocked by a database safeguard: {ex}"]})
+        except db.INTEGRITY_ERRORS as ex:        # a database safeguard refused the change (e.g. negative stock)
+            self.json(409, {"errors": [f"Blocked by a database safeguard: {db.error_text(ex)}"]})
         except Exception as ex:  # keep the server alive; details go to the log only
             sys.stderr.write(f"internal error: {ex!r}\n")
             self.json(500, {"errors": ["internal error - see server log"]})
@@ -422,6 +422,9 @@ class Handler(BaseHTTPRequestHandler):
                   {"Content-Disposition": f'attachment; filename="{table}.csv"'})
 
     def backup(self, con):
+        if db.use_pg():       # Supabase keeps its own daily backups / point-in-time recovery; this is an extra logical copy
+            data = json.dumps(db.dump_all(con), default=str, indent=1).encode()
+            return self.send(200, data, "application/json", {"Content-Disposition": 'attachment; filename="ftz-backup.json"'})
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             dst = os.path.join(d, "backup.db")
@@ -468,7 +471,7 @@ def main():
     if os.environ.get("FTZ_RECON_AUTO", "1") != "0":     # daily reconciliation look-back
         stop = threading.Event()
         threading.Thread(target=recon.scheduler_loop, args=(stop, int(os.environ.get("FTZ_RECON_HOURS", "24"))), daemon=True).start()
-    print(f"FTZ system on http://{host}:{port}  (database: {db.db_path()})", flush=True)
+    print(f"FTZ system on http://{host}:{port}  (database: {db.where()})", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
