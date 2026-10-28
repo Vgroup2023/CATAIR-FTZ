@@ -37,6 +37,9 @@ and ACE/AES transmission.
 * `python3 tools/verify_catair.py FTZ_CATAIR.pdf [BatchBlock.pdf]` re-checks the code's layouts against the CBP PDF (FT, FZ, NF and ZD records, 264 fields).
 * **Limits:** this does not transmit to CBP; use your ABI software or broker. A/B/Y/Z come from the separate ABI Batch and Block Control chapter (Oct 2021 draft) and FT is treated as ESAR-style there; confirm with your ABI vendor. Mode-of-transport codes are only checked as 2 digits. CBP-side checks (bond, FIRMS, HTS validity, Prior Notice) cannot be done offline.
 
+## Database: SQLite or Supabase
+By default the app keeps everything in one SQLite file. Set `DATABASE_URL` to a PostgreSQL / Supabase connection string and it uses that instead, with row level security, a least-privilege app role, append-only history enforced by the database, and TLS. See **SUPABASE.md** for the setup and the security model.
+
 ## Install it on a computer, tablet or phone
 Open your site (it must be served over **HTTPS**, which Render and the VPS guide both do) and install it like an app: its own icon, its own window, no browser bars.
 
