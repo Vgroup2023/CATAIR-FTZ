@@ -283,25 +283,25 @@ def schema_sql(sqlite_schema, new_columns):
 
 ROUND_FN = """
 CREATE OR REPLACE FUNCTION round(double precision, integer) RETURNS double precision
-  LANGUAGE sql IMMUTABLE AS $$ SELECT round($1::numeric, $2)::double precision $$;
+  LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, public AS $$ SELECT round($1::numeric, $2)::double precision $$;
 """
 
 TRIGGERS_PG = """
-CREATE OR REPLACE FUNCTION ftz_lots_no_negative() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION ftz_lots_no_negative() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   IF NEW.qty_on_hand < -0.00005 OR NEW.qty_out < -0.00005 OR COALESCE(NEW.qty2_on_hand,0) < -0.00005 OR COALESCE(NEW.qty2_out,0) < -0.00005 THEN
     RAISE EXCEPTION 'negative inventory blocked: this would remove stock that is not in the zone' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END $$;
-CREATE OR REPLACE FUNCTION ftz_lots_no_negative_ins() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION ftz_lots_no_negative_ins() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   IF NEW.qty_on_hand < 0 OR NEW.qty_out < 0 THEN
     RAISE EXCEPTION 'negative inventory blocked' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END $$;
-CREATE OR REPLACE FUNCTION ftz_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION ftz_append_only() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   RAISE EXCEPTION '%', TG_ARGV[0] USING ERRCODE = '23514';
 END $$;
