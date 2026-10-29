@@ -44,7 +44,7 @@ class TestHeaders(SiteCase):
             if name.endswith(".html"):
                 with open(os.path.join(d, name)) as fh:
                     text = fh.read()
-                self.assertIsNone(re.search(r"<script(?![^>]*\bsrc=)[^>]*>", text), name + " has an inline script")
+                self.assertIsNone(re.search(r"<script(?![^>]*\bsrc=)(?![^>]*speculationrules)[^>]*>", text), name + " has an inline script")
                 self.assertIsNone(re.search(r"\son\w+\s*=", text), name + " has an inline event handler")
 
     def test_deep_health_check(self):
@@ -110,3 +110,31 @@ class TestPublicPages(SiteCase):
         front = s.call("GET", "/")[1]
         self.assertIn(b'href="/security"', front)
         self.assertIn(b'href="/privacy"', front)
+
+
+class TestPrerender(SiteCase):
+    def rules(self, name):
+        import os
+        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ftz", "static", name)
+        with open(d) as fh:
+            m = re.search(r'<script type="speculationrules">\s*(.*?)\s*</script>', fh.read(), re.S)
+        return json.loads(m.group(1)) if m else None
+
+    def test_public_pages_prerender_same_site_links_on_hover_or_click(self):
+        for page in ("login.html", "security.html", "privacy.html"):
+            r = self.rules(page)["prerender"][0]
+            self.assertEqual(r["eagerness"], "moderate", page)                      # hover (about 200 ms) or pointer-down
+            conds = r["where"]["and"]
+            self.assertEqual(conds[0], {"href_matches": "/*"}, page)                # same site only
+            blocked = " ".join(conds[1]["not"]["href_matches"])
+            for path in ("/api/", "/auth/", "/print/", "/export/", "/backup", "/training/"):
+                self.assertIn(path, blocked, page)                                  # nothing that does work or writes the audit log
+
+    def test_the_signed_in_app_does_not_prerender(self):
+        self.assertIsNone(self.rules("index.html"))
+
+    def test_csp_allows_speculation_rules_but_not_other_inline_script(self):
+        _, _, r = self.start().call("GET", "/")
+        csp = r.getheader("Content-Security-Policy")
+        self.assertIn("script-src 'self' 'inline-speculation-rules';", csp)
+        self.assertNotIn("unsafe-inline'; style", csp.split("script-src")[1][:60])
