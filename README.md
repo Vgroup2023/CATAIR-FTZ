@@ -43,6 +43,9 @@ and ACE/AES transmission.
 * **Documents** (Documents screen, and on every e214, e216 and in-bond record): invoices, bills of lading, CBP notices, permits. PDF, images, CSV/TXT, Word and Excel up to 8 MB, checked against their real file type, SHA-256 fingerprinted when stored and re-checked on every download. They cannot be deleted or edited (also enforced by the database); a wrong file is *voided* with a reason and stays on record. Uploads, downloads and voids are audit-logged, and the integrity report covers them.
 * **Browser hardening:** content security policy, HSTS, no framing, no sniffing; the application code is served only to signed-in users. `/healthz?deep=1` is a database-checking health URL for uptime monitors. Public **Security** and **Privacy** pages are linked from the front page.
 
+## Training and SOP
+The **Training & SOP** menu item is a guided course for new users: 19 sections with role-based reading paths, step-by-step procedures (admit goods, CATAIR files, permits, inventory and FIFO, in-bond, documents, reconciliation, integrations, accounts), daily/weekly/monthly/yearly checklists, troubleshooting, record-keeping rules and a training record. Progress ticks are remembered per user in the browser. **Download guide (.odt)** gives the same content as an OpenDocument file (opens in Word, LibreOffice, Google Docs, Pages) with a contents page, tables, checklists and a sign-off page. The content lives in `ftz/training.py`; `tests/test_training.py` fails if a menu item or button named in the guide no longer exists in the app, so the guide cannot drift silently.
+
 ## Database: SQLite or Supabase
 By default the app keeps everything in one SQLite file. Set `DATABASE_URL` to a PostgreSQL / Supabase connection string and it uses that instead, with row level security, a least-privilege app role, append-only history enforced by the database, and TLS. See **SUPABASE.md** for the setup and the security model.
 

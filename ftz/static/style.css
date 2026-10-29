@@ -77,3 +77,15 @@ td a,.sub a,.alert a{color:var(--link);white-space:nowrap}td a:hover{text-decora
 .ftmap tr.miss{background:var(--badbg)}.ftmap td,.ftmap th{padding:4px 6px}
 .up{text-transform:uppercase}
 @media (max-width:1000px){.ftcols,.ftcols3{grid-template-columns:1fr}.ftsidebox{position:static;max-height:none}}
+/* Training & SOP */
+.trncols{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,3fr);gap:14px;align-items:start}
+.trntoc{position:sticky;top:10px;max-height:calc(100vh - 20px);overflow:auto}
+.trnlink{display:block;padding:6px 8px;border-radius:6px;cursor:pointer;color:var(--ink);font-size:13px}.trnlink:hover{background:var(--infobg)}.trnlink.on{background:var(--infobg);font-weight:700;color:var(--link)}
+.trnbar{height:6px;border-radius:3px;background:var(--line);margin:8px 0 10px}.trnbar span{display:block;height:100%;border-radius:3px;background:var(--accent)}
+.trnpane h3{margin:18px 0 6px}.trnlist{margin:6px 0 10px 20px}.trnlist li{margin:5px 0}
+.trnchk label{display:flex;gap:8px;align-items:flex-start;margin:6px 0;color:var(--ink);font-size:14px}.trnchk input{width:auto;margin-top:3px}
+.trnnote{padding:8px 12px;border-radius:6px;margin:10px 0;border-left:3px solid var(--link);background:var(--infobg)}.trnnote.tip{background:var(--okbg);border-color:var(--ok)}.trnnote.warn{background:var(--warnbg);border-color:var(--warn)}
+.trntable th,.trntable td{border:1px solid var(--line);vertical-align:top}.trntable th{background:var(--infobg);color:var(--ink)}
+@media (max-width:900px){.trncols{grid-template-columns:1fr}.trntoc{position:static;max-height:none}}
+@media print{aside,.bar,.trntoc,#toast,.sub a{display:none!important}body{display:block}main{padding:0}.card{border:0}}
+.trnpane .bar label{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px}.trnpane .bar input[type=checkbox]{width:auto;margin:0}
