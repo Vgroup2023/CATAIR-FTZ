@@ -202,7 +202,7 @@ COOKIE = "ftz_session"
 GATED_JS = ("/app.js", "/ft.js", "/docs.js", "/training.js")           # the application code is served only to signed-in users
 AUDITOR_CAN_POST = {"/api/ft/check", "/api/ft/decode"}      # calculations that change nothing
 # Scripts only from this site; fonts from Google Fonts; no framing; no plug-ins. Inline styles are allowed (the UI sets some).
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; "
+CSP = ("default-src 'self'; script-src 'self' 'inline-speculation-rules'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; "
        "img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; "
        "form-action 'self'; frame-ancestors 'none'")
 
