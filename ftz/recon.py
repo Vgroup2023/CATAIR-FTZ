@@ -27,6 +27,9 @@ class ReconMixin:
             legacy = self.con.execute(f"SELECT COUNT(*) FROM {table} WHERE hash IS NULL").fetchone()[0]
             result["tables"][table] = {"rows_verified": n, "rows_before_chaining": legacy, "breaks": breaks[:50], "head": prev}
             result["ok"] = result["ok"] and not breaks
+        docs = self.doc_verify_all()
+        result["documents"] = docs
+        result["ok"] = result["ok"] and docs["ok"]
         return result
 
     # ------------------------------------------------------------- reconciliation

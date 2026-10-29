@@ -15,9 +15,9 @@
     <h2>You're offline</h2>
     <p class="hint">FTZ Control keeps one live ledger on the server so every device sees the same stock, duty and audit trail. It needs a connection to show or change records.</p>
     <p class="hint">Nothing you did was lost: anything already saved is safe on the server.</p>
-    <button class="primary wide" type="button" onclick="location.reload()">Try again</button>
+    <button class="primary wide" type="button" id="retry">Try again</button>
   </div>
 </main>
-<script>addEventListener("online", () => location.reload());</script>
+<script src="/offline.js"></script>
 </body>
 </html>

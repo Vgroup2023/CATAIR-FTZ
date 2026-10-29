@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d2250">
+<meta name="referrer" content="no-referrer">
+<title>Security - Globlexus FTZ Control</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+<style>body{display:block}.doc{max-width:760px;margin:0 auto;padding:28px 18px 60px}.doc h1{margin-top:8px}.doc h2{margin-top:26px}.doc li{margin:4px 0}.doc .brand img{width:96px}.doc table{margin:10px 0}</style>
+</head>
+<body>
+<main class="doc">
+<div class="brand" style="text-align:left;padding:0"><a href="/"><img src="logo.png" alt="Globlexus Group"></a></div>
+<h1>Security and data handling</h1>
+<p class="sub">How FTZ Control protects your zone records. Last updated 29 October 2026.</p>
+
+<h2>Your data stays yours</h2>
+<ul>
+<li>Records live in a dedicated PostgreSQL database. They are encrypted at rest by the database host and encrypted in transit: every connection to the app is HTTPS, and the app talks to the database over TLS.</li>
+<li>The app connects to the database with a restricted account. It cannot create or drop tables, and it cannot edit or delete the audit log or the inventory ledger. The database's public API is switched off for these tables (row level security with no public access).</li>
+<li>Passwords are stored only as salted PBKDF2-SHA256 hashes. Sign-in tokens, reset tokens and API keys are stored only as SHA-256 hashes: a database copy cannot be used to sign in.</li>
+</ul>
+
+<h2>Sign-in protection</h2>
+<ul>
+<li>Optional two-factor sign-in with any authenticator app, plus one-time recovery codes. Administrators can reset a lost device.</li>
+<li>Repeated wrong passwords or codes are blocked for 15 minutes. Passwords must be at least 10 characters and cannot be common or contain the user name.</li>
+<li>Sessions expire after 12 hours, cookies are HttpOnly, Secure and SameSite, and changing a password signs the person out everywhere.</li>
+<li>Roles: <b>Administrator</b>, <b>User</b>, and a read-only <b>Auditor</b> for customs auditors and advisers who need to look but not change.</li>
+</ul>
+
+<h2>A record that stands up to an audit</h2>
+<ul>
+<li>Every change is written to an append-only audit log. The audit log and the stock ledger are hash-chained (each row carries a SHA-256 fingerprint of the one before), so an edit or a removed row is detected by the integrity check.</li>
+<li>The database itself refuses negative inventory and refuses to change or delete history, even if the application had a bug.</li>
+<li>Supporting documents are fingerprinted when stored and re-checked on every download. They are never deleted; a wrong file is voided with a reason and stays on record. Every upload, download and void is logged.</li>
+</ul>
+
+<h2>Application security</h2>
+<ul>
+<li>Strict content security policy, HSTS, no framing, no content sniffing, and cross-site request protection on every change.</li>
+<li>The application code is served only to signed-in users. Uploaded files are always downloaded, never displayed in the browser, and are checked against their declared type.</li>
+<li>ERP and WMS connections use revocable API keys that can reach only the endpoints they need.</li>
+</ul>
+
+<h2>Backups and availability</h2>
+<ul>
+<li>The database host takes daily backups with point-in-time recovery. Administrators can also download a full copy of the data at any time.</li>
+<li>A health check monitors the service and the database.</li>
+</ul>
+
+<h2>What FTZ Control does not do</h2>
+<ul>
+<li>It prepares the e214, FZ and in-bond data that your team or broker files through ACE. It does not transmit filings to U.S. Customs and Border Protection.</li>
+<li>It does not replace your own compliance review of what is filed.</li>
+</ul>
+
+<h2>Reporting a security concern</h2>
+<p>Email the contact address your administrator gave you, or the address shown on the front page, with the details. Please do not include customer data in the message.</p>
+<p class="sub" style="margin-top:30px"><a href="/">Back to sign in</a> · <a href="/security">Security</a> · <a href="/privacy">Privacy</a></p>
+</main>
+</body>
+</html>

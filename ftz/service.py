@@ -5,6 +5,7 @@ import re
 from . import rules
 from .common import ApiError, need, pick, proportional, r4, round_q  # noqa: F401  (re-exported for other modules)
 from .db import MOVE_FIELDS, audit, chain_hash, last_hash, next_no, now, one, rows
+from .documents import DocumentsMixin
 from .ftfiling import FtFilingMixin
 from .integration import IntegrationMixin
 from .recon import ReconMixin
@@ -12,7 +13,7 @@ from .recon import ReconMixin
 EPS = 1e-4
 
 
-class Service(IntegrationMixin, ReconMixin, FtFilingMixin):
+class Service(IntegrationMixin, ReconMixin, FtFilingMixin, DocumentsMixin):
     def __init__(self, con, user="unknown"):
         self.con, self.user = con, user or "unknown"
 

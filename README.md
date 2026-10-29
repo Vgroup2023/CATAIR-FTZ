@@ -37,6 +37,12 @@ and ACE/AES transmission.
 * `python3 tools/verify_catair.py FTZ_CATAIR.pdf [BatchBlock.pdf]` re-checks the code's layouts against the CBP PDF (FT, FZ, NF and ZD records, 264 fields).
 * **Limits:** this does not transmit to CBP; use your ABI software or broker. A/B/Y/Z come from the separate ABI Batch and Block Control chapter (Oct 2021 draft) and FT is treated as ESAR-style there; confirm with your ABI vendor. Mode-of-transport codes are only checked as 2 digits. CBP-side checks (bond, FIRMS, HTS validity, Prior Notice) cannot be done offline.
 
+## Security features for production use
+* **Roles:** Administrator, User, and a read-only **Auditor** (can view and export everything, change nothing) for customs auditors and advisers.
+* **Two-factor sign-in** (My Account): any authenticator app, one-time recovery codes, replay protection, rate limiting; an administrator can reset a lost device (Users).
+* **Documents** (Documents screen, and on every e214, e216 and in-bond record): invoices, bills of lading, CBP notices, permits. PDF, images, CSV/TXT, Word and Excel up to 8 MB, checked against their real file type, SHA-256 fingerprinted when stored and re-checked on every download. They cannot be deleted or edited (also enforced by the database); a wrong file is *voided* with a reason and stays on record. Uploads, downloads and voids are audit-logged, and the integrity report covers them.
+* **Browser hardening:** content security policy, HSTS, no framing, no sniffing; the application code is served only to signed-in users. `/healthz?deep=1` is a database-checking health URL for uptime monitors. Public **Security** and **Privacy** pages are linked from the front page.
+
 ## Database: SQLite or Supabase
 By default the app keeps everything in one SQLite file. Set `DATABASE_URL` to a PostgreSQL / Supabase connection string and it uses that instead, with row level security, a least-privilege app role, append-only history enforced by the database, and TLS. See **SUPABASE.md** for the setup and the security model.
 
