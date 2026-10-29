@@ -12,9 +12,11 @@ import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 
+from . import mfa
 from .db import audit, now, one, rows
 from .service import ApiError, need
 
+ROLES = ("admin", "user", "auditor")      # auditor = read-only: can view and export everything, change nothing
 SESSION_HOURS = 12
 RESET_MINUTES = 30
 COMMON = {"password", "password1", "password123", "1234567890", "12345678910", "qwertyuiop", "letmein123",
@@ -111,7 +113,7 @@ def valid_email(e):
 def create_user(con, username, password, email=None, role="user", is_demo=0, check_policy=True):
     username = (username or "").strip()
     need(re.match(r"^[A-Za-z0-9._-]{3,40}$", username), "user name must be 3-40 letters, numbers, . _ or -")
-    need(role in ("admin", "user"), "role must be admin or user")
+    need(role in ROLES, "role must be admin, user or auditor")
     email = (email or "").strip() or None
     need(email is None or valid_email(email), "email address looks invalid")
     if check_policy:
@@ -128,7 +130,8 @@ def create_user(con, username, password, email=None, role="user", is_demo=0, che
 
 def public_user(u):
     return {"id": u["id"], "username": u["username"], "email": u["email"], "role": u["role"],
-            "is_demo": bool(u["is_demo"]), "active": bool(u["active"]), "last_login": u.get("last_login")}
+            "is_demo": bool(u["is_demo"]), "active": bool(u["active"]), "last_login": u.get("last_login"),
+            "mfa": bool(u.get("mfa_enabled"))}
 
 
 def list_users(con):
@@ -315,3 +318,54 @@ def seed_users(con):
         notes.append(f"NO ACCOUNTS EXISTED - created user 'admin' with one-time password: {pw}  (change it under My Account)")
     con.commit()
     return notes
+
+
+# ----------------------------------------------------------------------------------------------- two-factor sign-in
+def mfa_begin(con, user):
+    need(not user["is_demo"], "two-factor sign-in is not available on the shared demo account")
+    need(not user.get("mfa_enabled"), "two-factor sign-in is already on; turn it off first to set it up again")
+    secret = mfa.new_secret()
+    con.execute("UPDATE users SET mfa_secret=?, mfa_enabled=0, mfa_recovery=NULL, mfa_last_step=0 WHERE id=?", (secret, user["id"]))
+    return {"secret": mfa.pretty(secret), "uri": mfa.uri(user["username"], secret)}
+
+
+def mfa_enable(con, user, code):
+    u = one(con, "SELECT * FROM users WHERE id=?", (user["id"],))
+    need(u["mfa_secret"] and not u["mfa_enabled"], "start the set-up first")
+    step = mfa.verify(u["mfa_secret"], code)
+    need(step, "that code is not right. Check the time on your phone and try the newest code")
+    codes, stored = mfa.new_recovery_codes()
+    con.execute("UPDATE users SET mfa_enabled=1, mfa_recovery=?, mfa_last_step=? WHERE id=?", (stored, step, user["id"]))
+    audit(con, u["username"], "enable_2fa", "user", u["id"])
+    return {"recovery_codes": codes}
+
+
+def mfa_check(con, u, code):
+    """Accept a current authenticator code (once) or an unused recovery code. Updates the stored state."""
+    step = mfa.verify(u["mfa_secret"], code, u.get("mfa_last_step") or 0)
+    if step:
+        con.execute("UPDATE users SET mfa_last_step=? WHERE id=?", (step, u["id"]))
+        return True
+    left = mfa.use_recovery(u.get("mfa_recovery"), code)
+    if left is not None:
+        con.execute("UPDATE users SET mfa_recovery=? WHERE id=?", (left, u["id"]))
+        audit(con, u["username"], "recovery_code_used", "user", u["id"], {"remaining": len(__import__("json").loads(left))})
+        return True
+    return False
+
+
+def mfa_disable(con, user, password, code):
+    u = one(con, "SELECT * FROM users WHERE id=?", (user["id"],))
+    need(u["mfa_enabled"], "two-factor sign-in is not on")
+    need(verify_password(password or "", u["password_hash"]), "your password is not right")
+    need(mfa_check(con, u, code), "that code is not right")
+    con.execute("UPDATE users SET mfa_secret=NULL, mfa_enabled=0, mfa_recovery=NULL, mfa_last_step=0 WHERE id=?", (u["id"],))
+    audit(con, u["username"], "disable_2fa", "user", u["id"])
+
+
+def admin_reset_mfa(con, actor, uid):
+    u = one(con, "SELECT * FROM users WHERE id=?", (uid,))
+    need(u, "user not found", 404)
+    con.execute("UPDATE users SET mfa_secret=NULL, mfa_enabled=0, mfa_recovery=NULL, mfa_last_step=0 WHERE id=?", (uid,))
+    end_user_sessions(con, uid)
+    audit(con, actor["username"], "reset_2fa", "user", uid, {"username": u["username"]})

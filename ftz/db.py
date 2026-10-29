@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS ft_exports(
 CREATE TABLE IF NOT EXISTS ft_responses(
   id INTEGER PRIMARY KEY, filing_id INTEGER NOT NULL REFERENCES ft_filings(id), ts TEXT, user TEXT, admission_number TEXT, disposition TEXT,
   message_type TEXT, message_code TEXT, outcome TEXT, summary TEXT, raw TEXT);
+CREATE TABLE IF NOT EXISTS documents(
+  id INTEGER PRIMARY KEY, entity TEXT NOT NULL, entity_id INTEGER NOT NULL, kind TEXT, filename TEXT NOT NULL, content_type TEXT NOT NULL,
+  size INTEGER NOT NULL, sha256 TEXT NOT NULL, content BLOB NOT NULL, note TEXT, uploaded_by TEXT, uploaded_at TEXT,
+  voided_at TEXT, voided_by TEXT, void_reason TEXT);
+CREATE INDEX IF NOT EXISTS documents_entity ON documents(entity, entity_id);
 CREATE TABLE IF NOT EXISTS recon_runs(
   id INTEGER PRIMARY KEY, run_at TEXT, kind TEXT, run_by TEXT, issues INTEGER, summary TEXT);
 """
@@ -138,6 +143,7 @@ NEW_COLUMNS = [
     ("activities", "qty2", "REAL"),
     ("inbond_lines", "qty2", "REAL"), ("inbond_lines", "part_no", "TEXT"),
     ("zones", "firms", "TEXT"), ("parts", "mid", "TEXT"), ("ft_filings", "kind", "TEXT DEFAULT 'FT'"),
+    ("users", "mfa_secret", "TEXT"), ("users", "mfa_enabled", "INTEGER NOT NULL DEFAULT 0"), ("users", "mfa_recovery", "TEXT"), ("users", "mfa_last_step", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # Database-level safeguards: they hold even if application code has a bug.
@@ -154,6 +160,13 @@ DROP TRIGGER IF EXISTS audit_no_update;
 CREATE TRIGGER audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;
 DROP TRIGGER IF EXISTS audit_no_delete;
 CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;
+DROP TRIGGER IF EXISTS documents_no_delete;
+CREATE TRIGGER documents_no_delete BEFORE DELETE ON documents BEGIN SELECT RAISE(ABORT, 'documents are kept as records: void them instead of deleting'); END;
+DROP TRIGGER IF EXISTS documents_no_edit;
+CREATE TRIGGER documents_no_edit BEFORE UPDATE ON documents
+WHEN NEW.content<>OLD.content OR NEW.sha256<>OLD.sha256 OR NEW.filename<>OLD.filename OR NEW.size<>OLD.size OR NEW.entity<>OLD.entity OR NEW.entity_id<>OLD.entity_id
+  OR NEW.uploaded_by<>OLD.uploaded_by OR OLD.voided_at IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'a stored document cannot be changed: void it and upload the corrected file'); END;
 DROP TRIGGER IF EXISTS movements_no_update;
 CREATE TRIGGER movements_no_update BEFORE UPDATE ON movements BEGIN SELECT RAISE(ABORT, 'the inventory ledger is append-only'); END;
 DROP TRIGGER IF EXISTS movements_no_delete;

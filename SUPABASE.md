@@ -45,6 +45,9 @@ fly deploy
 
 Leave `FTZ_DEMO_MODE` off for real records.
 
+## Updating an existing project
+Each release may add tables or columns (for example `documents` and the two-factor columns). The migrations are additive and safe to run again: apply the files in `supabase/migrations/` to your project (SQL editor, `supabase db push`, or ask Claude to run them), then deploy the new app version. The security migration is re-run each time so new tables are locked down too.
+
 ## What is protected, and how
 | Risk | Control |
 |---|---|
@@ -55,7 +58,9 @@ Leave `FTZ_DEMO_MODE` off for real records.
 | Two users at once | One writer at a time (advisory lock), so FIFO, counters and hash chains stay consistent |
 | Data in transit | TLS required to Supabase; HTTPS at the host |
 | Secrets | Connection string and passwords only in the host's secret store; the ABI password is never stored |
-| Backups | Supabase daily backups (point-in-time recovery on paid plans); `/backup` (administrators) downloads a JSON copy of every table |
+| Backups | Supabase daily backups (point-in-time recovery on Pro); `/backup` (administrators) downloads a JSON copy of every table, including stored documents (base64) |
+| Stored documents | Fingerprinted, re-verified on download, never deleted (database trigger); `ftz_app` has no DELETE or TRUNCATE on them |
+| Second factor | Optional TOTP per user; the authenticator key is stored in the database, protected by the controls above |
 
 ## Testing against PostgreSQL
 `FTZ_TEST_PG_URL=postgresql://postgres@127.0.0.1:5433/postgres python3 -m unittest discover -s tests` runs the whole suite on a throw-away schema in a local PostgreSQL (with the `citext` extension). Without that variable the suite runs on SQLite as before.

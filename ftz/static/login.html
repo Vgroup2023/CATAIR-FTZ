@@ -43,6 +43,9 @@
         <label>Password
           <span class="pw"><input name="password" id="password" type="password" autocomplete="current-password" required>
           <button type="button" class="sm ghost" data-toggle="password">Show</button></span></label>
+        <label id="code-row" hidden>Authentication code
+          <input name="code" id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="14" placeholder="6-digit code or a recovery code">
+          <span class="hint">From your authenticator app. Lost your phone? Use one of your recovery codes.</span></label>
         <div class="msg" id="login-msg" role="alert"></div>
         <button class="primary wide" type="submit">Sign in</button>
       </form>
@@ -126,7 +129,7 @@
 </section>
 
 <footer class="mk-foot">
-  <p>Globlexus Group · FTZ Control</p>
+  <p>Globlexus Group · FTZ Control · <a href="/security">Security</a> · <a href="/privacy">Privacy</a></p>
   <p class="fine">FTZ Control prepares the data your team or broker files in ACE; it does not transmit filings to CBP.</p>
 </footer>
 <script src="pwa.js"></script>

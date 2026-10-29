@@ -38,8 +38,11 @@ if ($("#login-form")) {
 
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault(); const f = e.target; busy(f, true); say($("#login-msg"), "");
-    try { await post("/auth/login", { username: f.username.value, password: f.password.value }); location.href = "/"; }
-    catch (err) { say($("#login-msg"), err.message, "err"); busy(f, false); f.password.select(); }
+    try {
+      const r = await post("/auth/login", { username: f.username.value, password: f.password.value, code: f.code.value });
+      if (r.mfa_required) { $("#code-row").hidden = false; $("#code").focus(); say($("#login-msg"), "Enter the code from your authenticator app."); busy(f, false); return; }
+      location.href = "/";
+    } catch (err) { say($("#login-msg"), err.message, "err"); busy(f, false); (f.code.value ? f.code : f.password).select(); }
   });
   const show = (forgot) => { $("#signin").hidden = forgot; $("#forgot").hidden = !forgot; (forgot ? $("#identifier") : $("#username")).focus(); };
   $("#show-forgot").addEventListener("click", (e) => { e.preventDefault(); $("#identifier").value = $("#username").value; show(true); });

@@ -129,7 +129,7 @@ const MODE_OPTS = () => opts(L.modes.map((m) => [m, m]));
 
 /* ---------- routing ---------- */
 const NAV = [
-  ["dashboard", "Dashboard"], ["sep", "Foreign-Trade Zone"], ["admissions", "e214 Admissions"], ["catair", "CATAIR FT Filing"], ["permits", "e216 Permits & Activity"],
+  ["dashboard", "Dashboard"], ["sep", "Foreign-Trade Zone"], ["admissions", "e214 Admissions"], ["catair", "CATAIR FT Filing"], ["documents", "Documents"], ["permits", "e216 Permits & Activity"],
   ["inventory", "Zone Inventory"], ["sep", "Bonded movements"], ["inbonds", "In-Bond IT · TE · IE"], ["sep", "System"],
   ["reports", "Reports"], ["integration", "Integrations & Parts"], ["setup", "Setup"], ["audit", "Audit & Export"], ["sep", "Account"], ["account", "My Account"], ["users", "Users"],
 ];
@@ -148,7 +148,7 @@ async function act(fn, msg) {   // run an action, toast result, or show its erro
 }
 function buildShell() {
   $("#menu").append(...NAV.filter(([k]) => k !== "users" || isAdmin()).map(([k, t]) => k === "sep" ? h("div", { class: "sep" }, t) : h("a", { "data-v": k, onclick: () => go(k) }, t)));
-  $("#who").replaceChildren(h("div", { class: "who" }, "Signed in as ", h("b", {}, ME.username), ME.is_demo ? " (demo)" : ""),
+  $("#who").replaceChildren(h("div", { class: "who" }, "Signed in as ", h("b", {}, ME.username), ME.is_demo ? " (demo)" : "", ME.role === "auditor" ? h("div", { class: "tag warn", style: "margin-top:4px" }, "Read-only auditor") : null),
     h("button", { class: "sm signout", onclick: async () => { try { await post("/auth/logout"); } finally { location.href = "/"; } } }, "Sign out"));
 }
 
@@ -282,7 +282,8 @@ async function admissionDetail(id) {
       table([{ h: "#", k: "line_no" }, { h: "Part", k: "part_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" }, { h: "COO", k: "coo" },
         { h: "Qty", f: (r) => qty(r.qty), num: true }, { h: "UOM", k: "uom" }, { h: "Customs qty", f: (r) => r.qty2 == null ? "" : `${qty(r.qty2)} ${r.uom2 || ""}`, num: true },
         { h: "Value", f: (r) => money(r.value), num: true },
-        { h: "Status", f: (r) => tag(r.zone_status, r.zone_status === "ZR" ? "warn" : "") }, { h: "Duty %", k: "duty_rate" }, { h: "PGA ref.", k: "pga_ref" }], s.lines))));
+        { h: "Status", f: (r) => tag(r.zone_status, r.zone_status === "ZR" ? "warn" : "") }, { h: "Duty %", k: "duty_rate" }, { h: "PGA ref.", k: "pga_ref" }], s.lines))),
+    docsPanel("admission", id));
   const close = modal(`e214 ${a.doc_no}`, body);
 }
 
@@ -345,7 +346,8 @@ function permitDetail(p) {
       p.status === "active" && h("button", { class: "danger", onclick: async () => { if (confirm("Revoke this permit?")) { await act(() => post(`/api/permits/${p.id}/revoke`)); close(); refresh(); } } }, "Revoke"),
       h("span", { class: "grow" }), h("a", { class: "btn", href: `/print/permit/${p.id}`, target: "_blank" }, "Print worksheet")),
     kv([["Zone", p.zone_no], ["Operator", p.operator_name], ["Type", L.permit_kinds[p.kind]], ["Valid", `${p.valid_from} → ${p.valid_to}`],
-      ["Activities", p.activity_list.map((a) => L.activities[a]).join(", ")], ["CBP ref.", p.cbp_ref], ["Description", p.description]])));
+      ["Activities", p.activity_list.map((a) => L.activities[a]).join(", ")], ["CBP ref.", p.cbp_ref], ["Description", p.description]]),
+    docsPanel("permit", p.id)));
 }
 
 async function activityForm() {
@@ -499,7 +501,8 @@ async function inbondDetail(id) {
       ["CBP in-bond no.", b.cbp_inbond_no], ["Issued", b.issued_date], ["Due at destination", b.due_date], ["Arrived", b.arrival_date],
       ["Entry no.", b.entry_no], ["Export date", b.export_date], ["Exporting carrier", b.export_carrier], ["Foreign destination", b.foreign_dest]]),
     h("div", { class: "card" }, table([{ h: "#", k: "line_no" }, { h: "Lot", k: "lot_no" }, { h: "Description", k: "description" }, { h: "HTSUS", k: "htsus" },
-      { h: "Qty", f: (r) => `${qty(r.qty)} ${r.uom}`, num: true }, { h: "Value", f: (r) => money(r.value), num: true }, { h: "Status", k: "zone_status" }], b.lines))));
+      { h: "Qty", f: (r) => `${qty(r.qty)} ${r.uom}`, num: true }, { h: "Value", f: (r) => money(r.value), num: true }, { h: "Status", k: "zone_status" }], b.lines)),
+    docsPanel("inbond", id)));
 }
 
 /* ---------- setup / audit ---------- */
@@ -707,9 +710,35 @@ VIEWS.account = async () => {
       h("button", { class: "primary", onclick: () => formModal("Change password", pwFields, {}, "Change password", async (v) => {
         if (v.new !== v.again) throw { errors: ["The new passwords do not match"] };
         await post("/auth/password", { current: v.current, new: v.new }); toast("Password changed"); }) }, "Change password"),
+      mfaButton(),
       h("button", { onclick: () => formModal("Email for password reset", [{ name: "email", label: "Email address", type: "email" }, { name: "current", label: "Current password", type: "password", required: true }],
         { email: ME.email }, "Save email", async (v) => { await post("/auth/email", v); toast("Email saved"); refresh(); }) }, "Set email")));
 };
+
+function mfaButton() {
+  if (ME.mfa) {
+    return h("button", { onclick: () => formModal("Turn off two-factor sign-in", [{ name: "password", label: "Your password", type: "password", required: true },
+      { name: "code", label: "Authenticator code or a recovery code", required: true }], {}, "Turn off", async (v) => { await post("/auth/mfa/disable", v); toast("Two-factor sign-in is off"); refresh(); }) }, "Turn off two-factor");
+  }
+  return h("button", { class: "primary", onclick: async () => {
+    const s = await act(() => post("/auth/mfa/begin"));
+    if (!s) return;
+    const code = h("input", { inputmode: "numeric", autocomplete: "one-time-code", maxlength: 6, placeholder: "6-digit code" });
+    const out = h("div");
+    const close = modal("Set up two-factor sign-in", h("div", {},
+      h("p", {}, "1. In your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy), add an account with this setup key:"),
+      h("p", {}, h("code", { style: "font-size:15px;letter-spacing:1px;user-select:all" }, s.secret)),
+      h("p", { class: "sub" }, "Choose \"enter a setup key\", time-based. Or open this link on your phone: ", h("a", { href: s.uri }, "add to authenticator")),
+      h("p", {}, "2. Type the 6-digit code the app shows:"), h("div", { class: "fields" }, h("label", {}, "Code", code)), out,
+      h("div", { class: "bar" }, h("button", { class: "primary", onclick: async () => {
+        try {
+          const r = await post("/auth/mfa/enable", { code: code.value });
+          out.replaceChildren(h("div", { class: "alert ok" }, h("b", {}, "Two-factor sign-in is on. Save these recovery codes now"), " (each works once; they are shown only this time):"),
+            h("pre", { style: "user-select:all;font-size:15px" }, r.recovery_codes.join("\n")), h("button", { onclick: () => { close(); refresh(); } }, "I have saved them"));
+        } catch (e) { out.replaceChildren(h("div", { class: "errs" }, (e.errors || [String(e)]).join("; "))); }
+      } }, "Turn on"))), { narrow: true });
+  } }, "Set up two-factor");
+}
 
 VIEWS.users = async () => {
   if (!isAdmin()) throw { errors: ["Administrators only"] };
@@ -718,12 +747,14 @@ VIEWS.users = async () => {
     async (v) => { await post(`/api/users/${u.id}/password`, v); toast("Password set - they are signed out everywhere"); });
   return h("div", {}, head("Users", "People who can sign in. Passwords are stored hashed; an email lets a person reset their own password.",
     h("button", { class: "primary", onclick: () => formModal("New user", [{ name: "username", label: "User name", required: true }, { name: "email", label: "Email", type: "email" },
-      { name: "role", label: "Role", type: "select", options: [["user", "User"], ["admin", "Administrator"]] }, { name: "password", label: "Temporary password (10+ characters)", type: "password", required: true }],
+      { name: "role", label: "Role", type: "select", options: [["user", "User"], ["auditor", "Auditor (read-only)"], ["admin", "Administrator"]] }, { name: "password", label: "Temporary password (10+ characters)", type: "password", required: true }],
       {}, "Create user", async (v) => { await post("/api/users", v); toast("User created"); refresh(); }) }, "+ New user")),
     h("div", { class: "card" }, table([{ h: "User", k: "username" }, { h: "Email", k: "email" }, { h: "Role", k: "role" },
-      { h: "Status", f: (u) => u.is_demo ? tag("demo", "warn") : tag(u.active ? "active" : "disabled", u.active ? "ok" : "bad") }, { h: "Last sign-in", k: "last_login" },
+      { h: "Status", f: (u) => u.is_demo ? tag("demo", "warn") : tag(u.active ? "active" : "disabled", u.active ? "ok" : "bad") }, { h: "2FA", f: (u) => u.is_demo ? "" : (u.mfa ? tag("on", "ok") : tag("off", "")) },
+      { h: "Last sign-in", k: "last_login" },
       { h: "", f: (u) => u.is_demo ? "" : h("span", {}, h("button", { class: "sm", onclick: () => setPw(u) }, "Set password"), " ",
-        h("button", { class: "sm", onclick: async () => { if (await act(() => post(`/api/users/${u.id}/${u.active ? "disable" : "enable"}`))) refresh(); } }, u.active ? "Disable" : "Enable")) }], users)));
+        h("button", { class: "sm", onclick: async () => { if (await act(() => post(`/api/users/${u.id}/${u.active ? "disable" : "enable"}`))) refresh(); } }, u.active ? "Disable" : "Enable"),
+        u.mfa ? h("span", {}, " ", h("button", { class: "sm danger", onclick: async () => { if (confirm(`Reset two-factor sign-in for ${u.username}? They are signed out and can set it up again.`) && await act(() => post(`/api/users/${u.id}/reset-2fa`), "Two-factor reset")) refresh(); } }, "Reset 2FA")) : null) }], users)));
 };
 
 VIEWS.audit = async () => {
