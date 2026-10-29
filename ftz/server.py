@@ -1,5 +1,6 @@
 """HTTP server (standard library only): JSON API, printable forms, CSV export, static UI."""
 import csv
+from datetime import date
 import html
 import io
 import json
@@ -14,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import auth, db, integration, pgcompat, rules
+from . import auth, db, integration, pgcompat, rules, training
 from . import recon
 from .auth import LIMITS
 from .db import audit
@@ -81,6 +82,7 @@ def routes():
     add("GET", "/api/recon", lambda s, m, b, q: s.recon_overview())
     add("POST", "/api/recon/run", lambda s, m, b, q: s.run_reconciliation("manual"))
     add("GET", "/api/integrity", lambda s, m, b, q: s.verify_integrity())
+    add("GET", "/api/training", lambda s, m, b, q: training.guide())
     add("GET", "/api/documents/spec", lambda s, m, b, q: s.doc_spec())
     add("GET", "/api/documents", lambda s, m, b, q: s.doc_list(q.get("entity"), q.get("entity_id"), q.get("voided", "1") != "0", q.get("q")))
     add("POST", "/api/documents", lambda s, m, b, q: s.doc_upload(b))
@@ -101,6 +103,19 @@ def routes():
 
 
 ROUTES = routes()
+
+
+_odt_cache = {}
+
+
+def odt_bytes():
+    """The training guide as an .odt file (built once per day and kept: it never depends on anyone's data)."""
+    key = date.today().isoformat()
+    if key not in _odt_cache:
+        with open(os.path.join(STATIC, "logo.png"), "rb") as fh:
+            _odt_cache.clear()
+            _odt_cache[key] = training.build_odt(fh.read())
+    return _odt_cache[key]
 
 
 def e(v):
@@ -184,7 +199,7 @@ INTEGRATION_ALLOWED = [("POST", r"/api/wms/(receipts|inventory)"), ("POST", r"/a
 PUBLIC_FILES = {"/style.css", "/auth.css", "/auth.js", "/pwa.js", "/logo.png", "/compass.png", "/favicon.png", "/manifest.webmanifest",
                 "/sw.js", "/offline.html", "/offline.js", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png"}
 COOKIE = "ftz_session"
-GATED_JS = ("/app.js", "/ft.js", "/docs.js")           # the application code is served only to signed-in users
+GATED_JS = ("/app.js", "/ft.js", "/docs.js", "/training.js")           # the application code is served only to signed-in users
 AUDITOR_CAN_POST = {"/api/ft/check", "/api/ft/decode"}      # calculations that change nothing
 # Scripts only from this site; fonts from Google Fonts; no framing; no plug-ins. Inline styles are allowed (the UI sets some).
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; "
@@ -453,6 +468,9 @@ class Handler(BaseHTTPRequestHandler):
                     if not (user["role"] == "admin" and not user["is_demo"]):
                         raise ApiError("administrators only", 403)  # the backup contains every account's password hash
                     return self.backup(con)
+                if method == "GET" and path == "/training/guide.odt":
+                    return self.send(200, odt_bytes(), "application/vnd.oasis.opendocument.text", {
+                        "Content-Disposition": 'attachment; filename="FTZ-Control-Training-and-SOP.odt"', "Content-Security-Policy": "default-src 'none'; sandbox"})
                 dl = re.fullmatch(r"/api/documents/(\d+)/download", path) if method == "GET" else None
                 if dl:
                     name, ctype, data = self.tx(con, lambda: svc.doc_download(int(dl[1])))

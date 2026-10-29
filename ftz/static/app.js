@@ -131,7 +131,7 @@ const MODE_OPTS = () => opts(L.modes.map((m) => [m, m]));
 const NAV = [
   ["dashboard", "Dashboard"], ["sep", "Foreign-Trade Zone"], ["admissions", "e214 Admissions"], ["catair", "CATAIR FT Filing"], ["documents", "Documents"], ["permits", "e216 Permits & Activity"],
   ["inventory", "Zone Inventory"], ["sep", "Bonded movements"], ["inbonds", "In-Bond IT · TE · IE"], ["sep", "System"],
-  ["reports", "Reports"], ["integration", "Integrations & Parts"], ["setup", "Setup"], ["audit", "Audit & Export"], ["sep", "Account"], ["account", "My Account"], ["users", "Users"],
+  ["reports", "Reports"], ["integration", "Integrations & Parts"], ["setup", "Setup"], ["audit", "Audit & Export"], ["training", "Training & SOP"], ["sep", "Account"], ["account", "My Account"], ["users", "Users"],
 ];
 const VIEWS = {};
 async function go(name, arg) {
@@ -163,6 +163,7 @@ VIEWS.dashboard = async () => {
   const inv = Object.fromEntries(d.inventory.map((i) => [i.zone_status, i]));
   return h("div", {},
     head("Dashboard", "Compliance position at a glance."),
+    h("p", { class: "sub" }, "New here? Start with the ", h("a", { href: "#training", onclick: () => go("training"), style: "cursor:pointer" }, "Training & SOP guide"), "."),
     h("div", { class: "grid" },
       stat(n(d.admissions, "submitted"), "e214 awaiting CBP approval", "admissions"),
       stat(n(d.admissions, "draft"), "e214 drafts", "admissions"),
