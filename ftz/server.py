@@ -9,10 +9,11 @@ import re
 import sqlite3
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import auth, db, integration, rules
+from . import auth, db, integration, pgcompat, rules
 from . import recon
 from .auth import LIMITS
 from .db import audit
@@ -450,7 +451,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self): self.handle_any("PUT")
 
 
+def check_database():
+    """PostgreSQL only: stop with a clear message (and a pause, so restarts do not hammer the login) if the database refuses us."""
+    if not db.use_pg() or os.environ.get("FTZ_TEST_PG_URL"):
+        return
+    problem = pgcompat.preflight(log=lambda m: sys.stderr.write(m + "\n"))
+    if problem:
+        sys.stderr.write("FTZ cannot start: " + problem + "\n")
+        sys.stderr.flush()
+        time.sleep(int(os.environ.get("FTZ_DB_FAIL_PAUSE", "90")))      # a crash loop would trigger Supabase's login circuit breaker
+        sys.exit(1)
+
+
 def make_server(host="127.0.0.1", port=8214):
+    check_database()
     con = db.connect()
     db.init(con)
     notes = auth.seed_users(con)

@@ -46,6 +46,31 @@ class TestConnectionSafety(unittest.TestCase):
         self.assertIn("ftz_app", text)
 
 
+class TestStartupDiagnosis(unittest.TestCase):
+    def test_messages_name_the_real_cause(self):
+        cases = {
+            'FATAL:  password authentication failed for user "ftz_app"': ("ALTER ROLE", False),
+            "FATAL:  (ECIRCUITBREAKER) too many authentication failures": ("10 minutes", True),
+            "FATAL:  Tenant or user not found": ("ftz_app.<project-ref>", False),
+            'could not translate host name "x" to address': ("host name", False),
+            "connection timeout expired": ("did not answer", True),
+        }
+        for msg, (needle, retry) in cases.items():
+            text, r = pgcompat.explain(msg)
+            self.assertIn(needle, text, msg)
+            self.assertEqual(r, retry, msg)
+
+    def test_unknown_errors_never_echo_a_password(self):
+        text, _ = pgcompat.explain("failed: postgresql://ftz_app:SuperSecret@host/db refused")
+        self.assertNotIn("SuperSecret", text)
+
+    def test_a_wrong_password_is_reported_once_not_retried(self):
+        calls = []
+        out = pgcompat.preflight("postgresql://u:p@127.0.0.1:1/x", tries=3, pause=0, sleep=lambda s: calls.append(s), log=lambda m: None)
+        self.assertTrue(out)                                  # nothing listens on port 1: a retryable failure ...
+        self.assertEqual(len(calls), 2)                       # ... so it pauses between its 3 tries instead of looping tightly
+
+
 class TestMigrationFiles(unittest.TestCase):
     def read(self, suffix):
         d = os.path.join(ROOT, "supabase", "migrations")

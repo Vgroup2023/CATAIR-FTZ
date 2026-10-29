@@ -255,6 +255,50 @@ def _cleanup():
         pass
 
 
+# ----------------------------------------------------------------------------------------------- start-up diagnosis
+def explain(message):
+    """Plain-language reason for a connection failure, from the server's own message. Returns (text, retryable)."""
+    m = str(message)
+    if "ECIRCUITBREAKER" in m:
+        return ("Supabase is temporarily blocking logins from this host after repeated failures. Wait about 10 minutes; "
+                "it clears by itself once the password is right", True)
+    if "password authentication failed" in m:
+        return ("The database refused the login: the password in DATABASE_URL does not match the password set for the "
+                "ftz_app role. Run ALTER ROLE ftz_app PASSWORD '...' in the Supabase SQL editor with the same password, "
+                "then update the DATABASE_URL secret", False)
+    if "Tenant or user not found" in m:
+        return ("The pooler does not know this user or project. The user must be written ftz_app.<project-ref> and the host must "
+                "be the Session pooler host shown under Connect in the Supabase dashboard", False)
+    if "could not translate host name" in m or "Name or service not known" in m:
+        return ("The database host name could not be found: check the host in DATABASE_URL", False)
+    if "timeout" in m.lower() or "timed out" in m.lower():
+        return ("The database did not answer in time: check the host and port in DATABASE_URL and that the project is running", True)
+    return ("Could not connect to the database: " + re.sub(r"://[^@\s]*@", "://***@", m).strip().splitlines()[0][:300], True)
+
+
+def preflight(url=None, tries=3, pause=20, sleep=None, log=print):
+    """Try one plain connection before the pool starts, so a wrong password is reported clearly (and not retried in a tight loop,
+    which would trip Supabase's login circuit breaker). Returns None when it works, else the explanation text."""
+    import time
+    sleep = sleep or time.sleep
+    url = url or database_url()
+    last = None
+    for i in range(tries):
+        try:
+            with psycopg.connect(secure_url(url), connect_timeout=10) as c:
+                c.execute("SELECT 1")
+            return None
+        except Exception as ex:
+            text, retry = explain(ex)
+            last = text
+            log(f"database check {i + 1}/{tries}: {text}")
+            if not retry:
+                return text
+            if i + 1 < tries:
+                sleep(pause)
+    return last
+
+
 def integrity_errors():
     return (pg_errors.IntegrityError,) if HAVE_PSYCOPG else ()
 
